@@ -37,6 +37,10 @@ export type ConfigFolder = {
   members: string[];
   /** Optional shared color applied to every Discord role in the folder. Unused for group folders. */
   color?: number;
+  /** Stable folder id, used to resolve nesting via {@link parent}. */
+  id?: string;
+  /** Id of the parent folder, or absent/null for a top-level folder. */
+  parent?: string | null;
 };
 
 export type DiscordRole = {

@@ -270,6 +270,8 @@ class EditorClient(
                     put("name", JsonPrimitive(folder.name))
                     put("members", JsonArray(folder.members.map { JsonPrimitive(it) }))
                     folder.color?.let { put("color", JsonPrimitive(it)) }
+                    folder.id?.let { put("id", JsonPrimitive(it)) }
+                    folder.parent?.let { put("parent", JsonPrimitive(it)) }
                 }
             }
         )
@@ -386,7 +388,9 @@ class EditorClient(
                     ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.ifBlank { null } }
                     ?: emptyList()
                 val color = obj["color"]?.jsonPrimitive?.intOrNull?.takeIf { it in 1..0xFFFFFF }
-                ConfigFolder(name, members, color)
+                val id = obj["id"]?.jsonPrimitive?.contentOrNull?.trim()?.ifBlank { null }
+                val parent = obj["parent"]?.jsonPrimitive?.contentOrNull?.trim()?.ifBlank { null }
+                ConfigFolder(name, members, color, id, parent)
             }
         } ?: emptyList()
 

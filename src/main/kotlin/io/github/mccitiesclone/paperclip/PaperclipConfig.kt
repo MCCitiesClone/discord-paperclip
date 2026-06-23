@@ -73,7 +73,9 @@ data class PaperclipConfig(
                     ?.mapNotNull { (it as? String)?.trim()?.ifBlank { null } }
                     ?: emptyList()
                 val color = (raw["color"] as? Number)?.toInt()?.takeIf { it in 1..0xFFFFFF }
-                ConfigFolder(name, members, color)
+                val id = (raw["id"] as? String)?.trim()?.ifBlank { null }
+                val parent = (raw["parent"] as? String)?.trim()?.ifBlank { null }
+                ConfigFolder(name, members, color, id, parent)
             }
 
         private fun normalizeWebSocketUrl(value: String): String {
@@ -97,6 +99,8 @@ data class ConfigFolder(
     val name: String,
     val members: List<String>,
     val color: Int? = null,
+    val id: String? = null,
+    val parent: String? = null,
 )
 
 data class SyncSettings(

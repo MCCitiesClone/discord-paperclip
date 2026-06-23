@@ -6,7 +6,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   Circle,
   Copy,
   Folder as FolderIcon,
@@ -75,6 +74,7 @@ type Folder = {
   name: string;
   collapsed: boolean;
   color: number;
+  parentId: string | null;
 };
 
 type GroupItem = {
@@ -688,10 +688,17 @@ function FolderedList<T extends FolderedItem>({
     folderId: string | null;
     position: "before" | "after" | "into";
   } | null>(null);
+  const [folderDragId, setFolderDragId] = useState<string | null>(null);
+  const [folderDropHint, setFolderDropHint] = useState<{
+    id: string;
+    position: "before" | "after" | "into";
+  } | null>(null);
 
   const resetDrag = () => {
     setDragId(null);
     setDropHint(null);
+    setFolderDragId(null);
+    setFolderDropHint(null);
   };
 
   const moveItemTo = (
@@ -730,6 +737,63 @@ function FolderedList<T extends FolderedItem>({
     resetDrag();
   };
 
+  // Is `nodeId` inside the subtree rooted at `ancestorId` (inclusive)?
+  const isDescendant = (nodeId: string, ancestorId: string) => {
+    const seen = new Set<string>();
+    let current: Folder | undefined = folders.find((folder) => folder.id === nodeId);
+    while (current && !seen.has(current.id)) {
+      if (current.id === ancestorId) return true;
+      seen.add(current.id);
+      current = current.parentId ? folders.find((folder) => folder.id === current!.parentId) : undefined;
+    }
+    return false;
+  };
+
+  const moveFolder = (id: string, targetId: string, position: "before" | "after" | "into") => {
+    if (id === targetId || isDescendant(targetId, id)) return;
+    const dragged = folders.find((folder) => folder.id === id);
+    const target = folders.find((folder) => folder.id === targetId);
+    if (!dragged || !target) return;
+    const parentId = position === "into" ? target.id : target.parentId;
+    const updated = { ...dragged, parentId };
+    const rest = folders.filter((folder) => folder.id !== id);
+    let index = rest.findIndex((folder) => folder.id === targetId);
+    if (position !== "before") index += 1;
+    const nextFolders = [...rest.slice(0, index), updated, ...rest.slice(index)];
+    onFoldersChange(nextFolders);
+    onItemsChange(reflow(items, nextFolders));
+  };
+
+  const folderDropPosition = (event: React.DragEvent): "before" | "after" | "into" => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const offset = (event.clientY - rect.top) / rect.height;
+    if (offset < 0.25) return "before";
+    if (offset > 0.75) return "after";
+    return "into";
+  };
+
+  const headerDragOver = (folder: Folder) => (event: React.DragEvent) => {
+    if (folderDragId) {
+      if (folderDragId === folder.id || isDescendant(folder.id, folderDragId)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setFolderDropHint({ id: folder.id, position: folderDropPosition(event) });
+      return;
+    }
+    zoneDragOver(folder.id)(event);
+  };
+
+  const headerDrop = (folder: Folder) => (event: React.DragEvent) => {
+    if (folderDragId) {
+      event.preventDefault();
+      event.stopPropagation();
+      moveFolder(folderDragId, folder.id, folderDropPosition(event));
+      resetDrag();
+      return;
+    }
+    zoneDrop(folder.id)(event);
+  };
+
   const addItem = (folderId: string | null) => {
     const created = makeItem(folderId);
     const next = addToTop ? [created, ...items] : [...items, created];
@@ -745,30 +809,29 @@ function FolderedList<T extends FolderedItem>({
   };
 
   const addFolder = () => {
-    onFoldersChange([...folders, { id: crypto.randomUUID(), name: "New folder", collapsed: false, color: 0 }]);
+    onFoldersChange([
+      ...folders,
+      { id: crypto.randomUUID(), name: "New folder", collapsed: false, color: 0, parentId: null },
+    ]);
   };
 
   const updateFolder = (id: string, patch: Partial<Folder>) => {
     onFoldersChange(folders.map((folder) => (folder.id === id ? { ...folder, ...patch } : folder)));
   };
 
-  const moveFolder = (id: string, direction: -1 | 1) => {
-    const index = folders.findIndex((folder) => folder.id === id);
-    const target = index + direction;
-    if (target < 0 || target >= folders.length) return;
-    const nextFolders = move(folders, index, direction);
-    onFoldersChange(nextFolders);
-    onItemsChange(reflow(items, nextFolders));
-  };
-
   const removeFolder = (id: string) => {
-    const nextFolders = folders.filter((folder) => folder.id !== id);
+    const parentId = folders.find((folder) => folder.id === id)?.parentId ?? null;
+    const nextFolders = folders
+      .filter((folder) => folder.id !== id)
+      .map((folder) => (folder.parentId === id ? { ...folder, parentId } : folder));
     const nextItems = items.map((item) => (item.folderId === id ? { ...item, folderId: null } : item));
     onFoldersChange(nextFolders);
     onItemsChange(reflow(nextItems, nextFolders));
   };
 
-  const renderRows = (subset: T[]) =>
+  const indentPad = (depth: number) => 16 + depth * 20;
+
+  const renderRows = (subset: T[], depth: number) =>
     subset.map((item) => {
       const dropBefore = dropHint?.id === item.id && dropHint.position === "before";
       const dropAfter = dropHint?.id === item.id && dropHint.position === "after";
@@ -793,7 +856,7 @@ function FolderedList<T extends FolderedItem>({
         <div
           key={item.id}
           className="relative grid min-w-[680px] items-center gap-3 border-b px-4 py-3 last:border-b-0"
-          style={{ gridTemplateColumns: gridColumns }}
+          style={{ gridTemplateColumns: gridColumns, paddingLeft: indentPad(depth) }}
           onDragOver={rowDragOver}
           onDrop={rowDrop}
         >
@@ -833,6 +896,110 @@ function FolderedList<T extends FolderedItem>({
     (item) => item.folderId === null || !folders.some((folder) => folder.id === item.folderId),
   );
 
+  const folderIds = new Set(folders.map((folder) => folder.id));
+  const childFolders = (parentId: string | null) =>
+    folders.filter((folder) =>
+      parentId === null
+        ? folder.parentId === null || !folderIds.has(folder.parentId)
+        : folder.parentId === parentId,
+    );
+
+  const renderFolder = (folder: Folder, depth: number): React.ReactNode => {
+    const folderItems = items.filter((item) => item.folderId === folder.id);
+    const subFolders = childFolders(folder.id);
+    const intoActive =
+      (dropHint?.folderId === folder.id && dropHint.position === "into") ||
+      (folderDropHint?.id === folder.id && folderDropHint.position === "into");
+    return (
+      <div key={folder.id}>
+        <div
+          className={`relative flex min-w-[680px] items-center gap-2 border-b bg-muted/50 py-2 pr-4 ${
+            intoActive ? "ring-2 ring-inset ring-primary" : ""
+          }`}
+          style={{ paddingLeft: indentPad(depth) }}
+          onDragOver={headerDragOver(folder)}
+          onDrop={headerDrop(folder)}
+        >
+          {folderDropHint?.id === folder.id && folderDropHint.position === "before" ? (
+            <div className="pointer-events-none absolute inset-x-0 -top-px z-10 h-0.5 bg-primary" />
+          ) : null}
+          {folderDropHint?.id === folder.id && folderDropHint.position === "after" ? (
+            <div className="pointer-events-none absolute inset-x-0 -bottom-px z-10 h-0.5 bg-primary" />
+          ) : null}
+          <span
+            draggable
+            onDragStart={(event) => {
+              setFolderDragId(folder.id);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", folder.id);
+            }}
+            onDragEnd={resetDrag}
+            className="flex size-7 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing"
+            aria-label="Drag to reorder folder"
+          >
+            <GripVertical className="size-4" />
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            aria-label={folder.collapsed ? "Expand folder" : "Collapse folder"}
+            onClick={() => updateFolder(folder.id, { collapsed: !folder.collapsed })}
+          >
+            {folder.collapsed ? <ChevronRight /> : <ChevronDown />}
+          </Button>
+          <FolderIcon className="size-4 text-muted-foreground" />
+          <Input
+            value={folder.name}
+            placeholder="Folder name"
+            className="h-8 max-w-xs"
+            onChange={(event) => updateFolder(folder.id, { name: event.target.value })}
+          />
+          {enableFolderColor ? (
+            <ColorField color={folder.color} onChange={(color) => updateFolder(folder.id, { color })} />
+          ) : null}
+          <span className="text-xs text-muted-foreground">{folderItems.length}</span>
+          <div className="ml-auto flex gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label="Add to folder"
+              onClick={() => addItem(folder.id)}
+            >
+              <Plus />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label="Delete folder"
+              onClick={() => removeFolder(folder.id)}
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        </div>
+        {folder.collapsed ? null : (
+          <>
+            {renderRows(folderItems, depth + 1)}
+            {subFolders.map((child) => renderFolder(child, depth + 1))}
+            {folderItems.length === 0 && subFolders.length === 0 ? (
+              <div
+                className="min-w-[680px] py-4 text-sm text-muted-foreground"
+                style={{ paddingLeft: indentPad(depth + 1) + 28 }}
+                onDragOver={zoneDragOver(folder.id)}
+                onDrop={zoneDrop(folder.id)}
+              >
+                Empty folder.
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Card className="overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b p-4">
@@ -865,128 +1032,18 @@ function FolderedList<T extends FolderedItem>({
         ) : (
           <>
             <div onDragOver={zoneDragOver(null)} onDrop={zoneDrop(null)}>
-              {renderRows(ungrouped)}
+              {renderRows(ungrouped, 0)}
               {folders.length > 0 && ungrouped.length === 0 && dragId ? (
                 <div className="min-w-[680px] border-b px-4 py-4 pl-12 text-sm text-muted-foreground">
                   Drop here to remove from folder.
                 </div>
               ) : null}
             </div>
-            {folders.map((folder, index) => {
-              const folderItems = items.filter((item) => item.folderId === folder.id);
-              return (
-                <div key={folder.id}>
-                  <div
-                    className={`flex min-w-[680px] items-center gap-2 border-b bg-muted/50 px-4 py-2 ${
-                      dropHint?.folderId === folder.id && dropHint.position === "into"
-                        ? "ring-2 ring-inset ring-primary"
-                        : ""
-                    }`}
-                    onDragOver={zoneDragOver(folder.id)}
-                    onDrop={zoneDrop(folder.id)}
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      aria-label={folder.collapsed ? "Expand folder" : "Collapse folder"}
-                      onClick={() => updateFolder(folder.id, { collapsed: !folder.collapsed })}
-                    >
-                      {folder.collapsed ? <ChevronRight /> : <ChevronDown />}
-                    </Button>
-                    <FolderIcon className="size-4 text-muted-foreground" />
-                    <Input
-                      value={folder.name}
-                      placeholder="Folder name"
-                      className="h-8 max-w-xs"
-                      onChange={(event) => updateFolder(folder.id, { name: event.target.value })}
-                    />
-                    {enableFolderColor ? (
-                      <ColorField
-                        color={folder.color}
-                        onChange={(color) => updateFolder(folder.id, { color })}
-                      />
-                    ) : null}
-                    <span className="text-xs text-muted-foreground">{folderItems.length}</span>
-                    <div className="ml-auto flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        aria-label="Add to folder"
-                        onClick={() => addItem(folder.id)}
-                      >
-                        <Plus />
-                      </Button>
-                      <OrderButtons
-                        index={index}
-                        count={folders.length}
-                        onMove={(direction) => moveFolder(folder.id, direction)}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        aria-label="Delete folder"
-                        onClick={() => removeFolder(folder.id)}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
-                  </div>
-                  {folder.collapsed ? null : folderItems.length === 0 ? (
-                    <div
-                      className="min-w-[680px] px-4 py-4 pl-12 text-sm text-muted-foreground"
-                      onDragOver={zoneDragOver(folder.id)}
-                      onDrop={zoneDrop(folder.id)}
-                    >
-                      Empty folder.
-                    </div>
-                  ) : (
-                    renderRows(folderItems)
-                  )}
-                </div>
-              );
-            })}
+            {childFolders(null).map((folder) => renderFolder(folder, 0))}
           </>
         )}
       </div>
     </Card>
-  );
-}
-
-function OrderButtons({
-  index,
-  count,
-  onMove,
-}: {
-  index: number;
-  count: number;
-  onMove: (direction: -1 | 1) => void;
-}) {
-  return (
-    <div className="flex gap-1">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7"
-        aria-label="Move up"
-        disabled={index === 0}
-        onClick={() => onMove(-1)}
-      >
-        <ChevronUp />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7"
-        aria-label="Move down"
-        disabled={index === count - 1}
-        onClick={() => onMove(1)}
-      >
-        <ChevronDown />
-      </Button>
-    </div>
   );
 }
 
@@ -1252,19 +1309,30 @@ function rolesToItems(roles: DiscordRole[]): RoleItem[] {
 
 function reflow<T extends FolderedItem>(items: T[], folders: Folder[]): T[] {
   const known = new Set(folders.map((folder) => folder.id));
+  const isRoot = (folder: Folder) => folder.parentId === null || !known.has(folder.parentId);
   const result = items.filter((item) => item.folderId === null || !known.has(item.folderId));
-  folders.forEach((folder) => {
-    result.push(...items.filter((item) => item.folderId === folder.id));
-  });
+  const visited = new Set<string>();
+  const walk = (parentId: string | null) => {
+    folders
+      .filter((folder) => (parentId === null ? isRoot(folder) : folder.parentId === parentId))
+      .forEach((folder) => {
+        if (visited.has(folder.id)) return;
+        visited.add(folder.id);
+        result.push(...items.filter((item) => item.folderId === folder.id));
+        walk(folder.id);
+      });
+  };
+  walk(null);
   return result;
 }
 
 function configToFolders(folders: ConfigFolder[]): Folder[] {
   return folders.map((folder) => ({
-    id: crypto.randomUUID(),
+    id: folder.id ?? crypto.randomUUID(),
     name: folder.name,
     collapsed: false,
     color: folder.color ?? 0,
+    parentId: folder.parent ?? null,
   }));
 }
 
@@ -1276,12 +1344,14 @@ function foldersToConfig<T extends FolderedItem>(
   return folders
     .filter((folder) => folder.name.trim())
     .map((folder) => ({
+      id: folder.id,
       name: folder.name.trim(),
       members: items
         .filter((item) => item.folderId === folder.id)
         .map(keyOf)
         .filter(Boolean),
       ...(hasColor(folder.color) ? { color: folder.color } : {}),
+      ...(folder.parentId ? { parent: folder.parentId } : {}),
     }));
 }
 
@@ -1321,16 +1391,6 @@ function assignFolders<T>(
       const secondRank = rankByKey.get(keyOf(second)) ?? Number.MAX_SAFE_INTEGER;
       return firstRank - secondRank;
     });
-}
-
-function move<T>(list: T[], index: number, direction: -1 | 1): T[] {
-  const target = index + direction;
-  if (target < 0 || target >= list.length) {
-    return list;
-  }
-  const next = [...list];
-  [next[index], next[target]] = [next[target], next[index]];
-  return next;
 }
 
 function uniqueSorted(values: string[]) {
