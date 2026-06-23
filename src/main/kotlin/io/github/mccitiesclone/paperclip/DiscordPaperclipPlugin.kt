@@ -113,7 +113,9 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         )
         linkService = LinkService(pluginConfig, dataFolder.toPath(), logger, ::completeAccountLink)
 
-        discordService.start(syncService::handleDiscordMemberRoleUpdate, linkService::completeCode)
+        discordService.start(syncService::handleDiscordMemberRoleUpdate) { discordUserId, code ->
+            linkService.completeCode(code, discordUserId)
+        }
         syncService.start()
     }
 
