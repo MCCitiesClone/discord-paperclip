@@ -6,6 +6,7 @@ import io.github.mccitiesclone.paperclip.editor.EditorClient
 import io.github.mccitiesclone.paperclip.editor.EditorResult
 import io.github.mccitiesclone.paperclip.luckperms.LuckPermsService
 import io.github.mccitiesclone.paperclip.sync.SyncService
+import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents
 import org.bukkit.event.HandlerList
 import org.bukkit.plugin.java.JavaPlugin
 
@@ -13,8 +14,10 @@ class DiscordPaperclipPlugin : JavaPlugin() {
     private lateinit var pluginConfig: PaperclipConfig
     private lateinit var luckPermsService: LuckPermsService
     private lateinit var discordService: DiscordService
-    private lateinit var syncService: SyncService
-    private lateinit var editorClient: EditorClient
+    internal lateinit var syncService: SyncService
+        private set
+    internal lateinit var editorClient: EditorClient
+        private set
 
     override fun onEnable() {
         saveDefaultConfig()
@@ -51,7 +54,6 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         }
         loadServices()
         server.pluginManager.registerEvents(syncService, this)
-        registerCommand()
     }
 
     fun applyEditorUpdate(result: EditorResult): EditorResult {
@@ -85,13 +87,9 @@ class DiscordPaperclipPlugin : JavaPlugin() {
     }
 
     private fun registerCommand() {
-        getCommand("paperclip")?.setExecutor(
-            PaperclipCommand(
-                plugin = this,
-                reloadAction = ::reloadPlugin,
-                syncService = syncService,
-                editorClient = editorClient,
-            )
-        )
+        val command = PaperclipCommand(plugin = this, reloadAction = ::reloadPlugin)
+        lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS) { event ->
+            event.registrar().register("paperclip", "Manage Discord Paperclip.", command)
+        }
     }
 }

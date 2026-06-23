@@ -11,11 +11,6 @@ dependencies:
       load: BEFORE
       required: true
       join-classpath: true
-commands:
-  paperclip:
-    description: Manage Discord Paperclip.
-    usage: /paperclip <reload|sync|editor [trust <nonce>]>
-    permission: paperclip.admin
 permissions:
   paperclip.admin:
     description: Allows managing Discord Paperclip.
