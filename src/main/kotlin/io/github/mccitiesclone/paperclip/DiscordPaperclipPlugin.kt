@@ -104,6 +104,8 @@ class DiscordPaperclipPlugin : JavaPlugin() {
                     put("name", folder.name)
                     put("members", folder.members)
                     folder.color?.let { put("color", it) }
+                    folder.id?.let { put("id", it) }
+                    folder.parent?.let { put("parent", it) }
                 }
             }
 
