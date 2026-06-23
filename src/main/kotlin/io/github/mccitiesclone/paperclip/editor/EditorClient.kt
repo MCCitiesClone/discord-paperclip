@@ -10,8 +10,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
 import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.net.http.WebSocket
 import java.nio.charset.StandardCharsets
 import java.security.KeyFactory
@@ -34,6 +32,7 @@ class EditorClient(
     private val logger: Logger,
 ) {
     private val client = HttpClient.newHttpClient()
+    private val bytebin = BytebinClient(client, config.editor.bytebinUrl)
     private val json = Json { ignoreUnknownKeys = true }
     private val activeSessions = ConcurrentHashMap<String, ActiveEditorSession>()
     private val pendingTrust = ConcurrentHashMap<String, ActiveEditorSession>()
@@ -102,41 +101,11 @@ class EditorClient(
             }
     }
 
-    private fun uploadPayload(payload: String): CompletableFuture<String> {
-        val request = HttpRequest.newBuilder(URI.create(config.editor.bytebinUrl))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(payload))
-            .build()
+    private fun uploadPayload(payload: String): CompletableFuture<String> =
+        bytebin.uploadJson(payload)
 
-        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-            .thenApply { response ->
-                if (response.statusCode() !in 200..299) {
-                    throw IllegalStateException("bytebin returned HTTP ${response.statusCode()}")
-                }
-                parsePayloadId(response.body())
-            }
-    }
-
-    private fun downloadPayload(payloadId: String): CompletableFuture<String> {
-        val request = HttpRequest.newBuilder(URI.create("${config.editor.bytebinUrl}/$payloadId"))
-            .GET()
-            .build()
-
-        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-            .thenApply { response ->
-                if (response.statusCode() !in 200..299) {
-                    throw IllegalStateException("bytebin returned HTTP ${response.statusCode()} for $payloadId")
-                }
-                response.body()
-            }
-    }
-
-    private fun parsePayloadId(body: String): String {
-        val root = json.parseToJsonElement(body).jsonObject
-        return root["key"]?.jsonPrimitive?.contentOrNull
-            ?: root["id"]?.jsonPrimitive?.contentOrNull
-            ?: throw IllegalStateException("bytebin response did not include key or id")
-    }
+    private fun downloadPayload(payloadId: String): CompletableFuture<String> =
+        bytebin.downloadJson(payloadId)
 
     private fun initialPayloadJson(channelId: String, publicKey: PublicKey): JsonObject =
         buildJsonObject {

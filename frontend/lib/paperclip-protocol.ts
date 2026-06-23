@@ -89,7 +89,7 @@ export async function signedPacket(
 }
 
 export async function fetchPayload<T>(bytebinUrl: string, payloadId: string) {
-  const response = await fetch(`${bytebinUrl.replace(/\/$/, "")}/${payloadId}`);
+  const response = await fetch(`${trimBytebinUrl(bytebinUrl)}/${encodeURIComponent(extractContentKey(payloadId))}`);
   if (!response.ok) {
     throw new Error(`bytebin returned HTTP ${response.status}`);
   }
@@ -97,22 +97,90 @@ export async function fetchPayload<T>(bytebinUrl: string, payloadId: string) {
 }
 
 export async function uploadPayload(bytebinUrl: string, body: unknown) {
-  const response = await fetch(bytebinUrl.replace(/\/$/, ""), {
+  const jsonBody = JSON.stringify(body);
+  let response = await postBytebin(bytebinUrl, jsonBody, true).catch(() =>
+    postBytebin(bytebinUrl, jsonBody, false),
+  );
+  if (response.status === 400 || response.status === 415 || response.status === 501) {
+    response = await postBytebin(bytebinUrl, jsonBody, false);
+  }
+  if (response.status === 404 || response.status === 405) {
+    return uploadPayloadLegacy(bytebinUrl, jsonBody);
+  }
+  if (!response.ok) {
+    throw new Error(`bytebin returned HTTP ${response.status}`);
+  }
+  return parseContentKey(response);
+}
+
+async function postBytebin(bytebinUrl: string, jsonBody: string, gzip: boolean) {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  let body: BodyInit = jsonBody;
+
+  if (gzip && "CompressionStream" in globalThis) {
+    headers["Content-Encoding"] = "gzip";
+    body = new Blob([jsonBody])
+      .stream()
+      .pipeThrough(new CompressionStream("gzip"));
+  }
+
+  return fetch(`${trimBytebinUrl(bytebinUrl)}/post`, {
+    method: "POST",
+    headers,
+    body,
+  });
+}
+
+async function uploadPayloadLegacy(bytebinUrl: string, jsonBody: string) {
+  const response = await fetch(trimBytebinUrl(bytebinUrl), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json",
     },
-    body: JSON.stringify(body),
+    body: jsonBody,
   });
   if (!response.ok) {
     throw new Error(`bytebin returned HTTP ${response.status}`);
   }
-  const payload = (await response.json()) as { key?: string; id?: string };
-  const id = payload.key ?? payload.id;
-  if (!id) {
-    throw new Error("bytebin response did not include key or id");
+  return parseContentKey(response);
+}
+
+async function parseContentKey(response: Response) {
+  const location = response.headers.get("Location");
+  if (location) {
+    return extractContentKey(location);
   }
-  return id;
+
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error("bytebin response did not include a Location header or response body");
+  }
+
+  const payload = JSON.parse(text) as { key?: string; id?: string; location?: string };
+  const id = payload.key ?? payload.id ?? payload.location;
+  if (!id?.trim()) {
+    throw new Error("bytebin response did not include Location, key, or id");
+  }
+  return extractContentKey(id);
+}
+
+function trimBytebinUrl(bytebinUrl: string) {
+  return bytebinUrl.trim().replace(/\/$/, "");
+}
+
+function extractContentKey(value: string) {
+  const trimmed = value.trim().replace(/\/$/, "");
+  if (!trimmed.includes("/")) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    return url.pathname.replace(/^\/|\/$/g, "").split("/").pop() ?? trimmed;
+  } catch {
+    return trimmed.split("/").pop() ?? trimmed;
+  }
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {

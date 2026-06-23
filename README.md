@@ -33,9 +33,13 @@ The shaded plugin jar is produced in `build/libs/discord-paperclip-0.1.0.jar`.
 
 The hosted editor follows the same broad shape as LuckPerms:
 
-- `editor.bytebin-url` stores JSON payloads with HTTP `POST` and returns `{ "key": "..." }` or `{ "id": "..." }`.
+- `editor.bytebin-url` is the bytebin base URL. Payloads are uploaded with `POST {editor.bytebin-url}/post`; LuckPerms-style services return the content key in the `Location` response header.
 - `GET {editor.bytebin-url}/{id}` returns a previously uploaded JSON payload.
 - `editor.bytesocks-url/{channelId}` is a WebSocket relay channel shared by the plugin and browser.
+
+For compatibility with simple bytebin clones, uploads also accept JSON response bodies with
+`key`, `id`, or `location`, and fall back to `POST {editor.bytebin-url}` when `/post` is not
+available.
 
 Initial bytebin payloads include the WebSocket channel ID, the plugin public key, and the
 current `group-role-map` and `linked-accounts`. Socket frames use this shape:

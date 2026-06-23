@@ -10,6 +10,8 @@ npm run dev
 ```
 
 The editor needs the same bytebin and bytesocks services configured in the plugin.
+Bytebin should support LuckPerms-style `POST /post` uploads that return a content key in
+the `Location` response header.
 You can provide them in the UI or set:
 
 ```sh

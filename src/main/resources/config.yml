@@ -17,7 +17,7 @@ sync:
 editor:
   # Hosted web application base URL. The plugin only makes outbound HTTP/WebSocket requests.
   base-url: "https://paperclip-editor.example.com"
-  # bytebin-compatible payload service.
+  # bytebin-compatible payload service base URL. LuckPerms-style uploads use POST {url}/post.
   bytebin-url: "https://bytebin.example.com"
   # bytesocks-compatible WebSocket service. The channel ID is appended to this URL.
   bytesocks-url: "wss://bytesocks.example.com"
