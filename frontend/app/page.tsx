@@ -629,11 +629,11 @@ function DiscordRoleManager({
         folderId,
       })}
       renderCells={(role, update) => {
-        const folderColor = folderColorFor(role.folderId, folders);
+        const inFolder = folders.some((folder) => folder.id === role.folderId);
         return (
           <>
-            {hasColor(folderColor) ? (
-              <InheritedColorField color={folderColor} />
+            {inFolder ? (
+              <InheritedColorField color={folderColorFor(role.folderId, folders)} />
             ) : (
               <ColorField color={role.color} onChange={(color) => update({ color })} />
             )}
@@ -680,7 +680,7 @@ function FolderedList<T extends FolderedItem>({
   makeItem: (folderId: string | null) => T;
   renderCells: (item: T, update: (patch: Partial<T>) => void) => React.ReactNode;
 }) {
-  const gridColumns = `96px ${columnTemplate} 150px 48px`;
+  const gridColumns = `48px ${columnTemplate} 48px`;
 
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{
@@ -744,27 +744,6 @@ function FolderedList<T extends FolderedItem>({
     onItemsChange(items.filter((item) => item.id !== id));
   };
 
-  const assignFolder = (id: string, folderId: string | null) => {
-    const target = items.find((item) => item.id === id);
-    if (!target) return;
-    const rest = items.filter((item) => item.id !== id);
-    onItemsChange(reflow([...rest, { ...target, folderId }], folders));
-  };
-
-  const moveItem = (id: string, direction: -1 | 1) => {
-    const index = items.findIndex((item) => item.id === id);
-    if (index < 0) return;
-    const { folderId } = items[index];
-    let target = index + direction;
-    while (target >= 0 && target < items.length && items[target].folderId !== folderId) {
-      target += direction;
-    }
-    if (target < 0 || target >= items.length) return;
-    const next = [...items];
-    [next[index], next[target]] = [next[target], next[index]];
-    onItemsChange(next);
-  };
-
   const addFolder = () => {
     onFoldersChange([...folders, { id: crypto.randomUUID(), name: "New folder", collapsed: false, color: 0 }]);
   };
@@ -790,7 +769,7 @@ function FolderedList<T extends FolderedItem>({
   };
 
   const renderRows = (subset: T[]) =>
-    subset.map((item, index) => {
+    subset.map((item) => {
       const dropBefore = dropHint?.id === item.id && dropHint.position === "before";
       const dropAfter = dropHint?.id === item.id && dropHint.position === "after";
       const rowDragOver = (event: React.DragEvent) => {
@@ -824,32 +803,20 @@ function FolderedList<T extends FolderedItem>({
           {dropAfter ? (
             <div className="pointer-events-none absolute inset-x-0 -bottom-px z-10 h-0.5 bg-primary" />
           ) : null}
-          <div className="flex items-center gap-1">
-            <span
-              draggable
-              onDragStart={(event) => {
-                setDragId(item.id);
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", item.id);
-              }}
-              onDragEnd={resetDrag}
-              className="flex size-7 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing"
-              aria-label="Drag to reorder"
-            >
-              <GripVertical className="size-4" />
-            </span>
-            <OrderButtons
-              index={index}
-              count={subset.length}
-              onMove={(direction) => moveItem(item.id, direction)}
-            />
-          </div>
+          <span
+            draggable
+            onDragStart={(event) => {
+              setDragId(item.id);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", item.id);
+            }}
+            onDragEnd={resetDrag}
+            className="flex size-7 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing"
+            aria-label="Drag to reorder"
+          >
+            <GripVertical className="size-4" />
+          </span>
           {renderCells(item, (patch) => updateItem(item.id, patch))}
-          <FolderSelect
-            value={item.folderId}
-            folders={folders}
-            onChange={(folderId) => assignFolder(item.id, folderId)}
-          />
           <Button
             variant="ghost"
             size="icon"
@@ -889,9 +856,8 @@ function FolderedList<T extends FolderedItem>({
           className="grid min-w-[680px] border-b bg-muted px-4 py-2 text-xs font-medium uppercase text-muted-foreground"
           style={{ gridTemplateColumns: gridColumns }}
         >
-          <div>Order</div>
+          <div />
           {headerCells}
-          <div>Folder</div>
           <div />
         </div>
         {items.length === 0 && folders.length === 0 ? (
@@ -989,31 +955,6 @@ function FolderedList<T extends FolderedItem>({
   );
 }
 
-function FolderSelect({
-  value,
-  folders,
-  onChange,
-}: {
-  value: string | null;
-  folders: Folder[];
-  onChange: (value: string | null) => void;
-}) {
-  return (
-    <select
-      value={value ?? ""}
-      onChange={(event) => onChange(event.target.value || null)}
-      className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      <option value="">No folder</option>
-      {folders.map((folder) => (
-        <option key={folder.id} value={folder.id}>
-          {folder.name.trim() || "Untitled"}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 function OrderButtons({
   index,
   count,
@@ -1086,13 +1027,16 @@ function ColorField({
 }
 
 function InheritedColorField({ color }: { color: number }) {
+  const colored = hasColor(color);
   return (
-    <div className="flex items-center gap-2" title="Color is shared from the folder">
+    <div className="flex items-center gap-2" title="Color is managed on the folder">
       <span
         aria-hidden="true"
-        className="size-8 shrink-0 rounded-md border"
-        style={{ backgroundColor: colorToHex(color) }}
-      />
+        className="relative flex size-8 shrink-0 items-center justify-center rounded-md border"
+        style={{ backgroundColor: colored ? colorToHex(color) : "transparent" }}
+      >
+        {colored ? null : <Palette className="size-4 text-muted-foreground" />}
+      </span>
       <span className="text-xs text-muted-foreground">Folder</span>
     </div>
   );
