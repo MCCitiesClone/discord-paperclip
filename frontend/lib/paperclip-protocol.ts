@@ -35,6 +35,8 @@ export type RefreshedPayload = {
 export type ConfigFolder = {
   name: string;
   members: string[];
+  /** Optional shared color applied to every Discord role in the folder. Unused for group folders. */
+  color?: number;
 };
 
 export type DiscordRole = {

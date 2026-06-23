@@ -99,7 +99,13 @@ class DiscordPaperclipPlugin : JavaPlugin() {
     private fun foldersToConfig(folders: List<ConfigFolder>): List<Map<String, Any>> =
         folders
             .filter { it.name.isNotBlank() }
-            .map { mapOf("name" to it.name, "members" to it.members) }
+            .map { folder ->
+                buildMap {
+                    put("name", folder.name)
+                    put("members", folder.members)
+                    folder.color?.let { put("color", it) }
+                }
+            }
 
     fun completeAccountLink(minecraftUuid: UUID, discordUserId: String) {
         if (server.isPrimaryThread) {

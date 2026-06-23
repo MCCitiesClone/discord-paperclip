@@ -48,5 +48,7 @@ role-group-map: {}
 # they group items in the web UI and are never applied to Discord or LuckPerms.
 # Each entry has a name and an ordered list of members. Edit these with the hosted editor.
 # group-folders members are LuckPerms group names; role-folders members are Discord role IDs.
+# A role-folder may also set an optional integer "color" (0-16777215); when present it is applied
+# to every Discord role in that folder, overriding each role's individual color.
 group-folders: []
 role-folders: []

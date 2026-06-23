@@ -73,6 +73,7 @@ type Folder = {
   id: string;
   name: string;
   collapsed: boolean;
+  color: number;
 };
 
 type GroupItem = {
@@ -167,7 +168,7 @@ export default function Home() {
         .map((role) => ({
           id: role.roleId.trim() || null,
           name: role.name.trim(),
-          color: role.color,
+          color: effectiveRoleColor(role, roleFolders),
         })),
       groupFolders: foldersToConfig(lpFolders, lpGroups, (group) => group.name.trim()),
       roleFolders: foldersToConfig(roleFolders, discordRoleItems, (role) => role.roleId.trim()),
@@ -613,6 +614,7 @@ function DiscordRoleManager({
       }
       emptyLabel="No roles."
       addToTop
+      enableFolderColor
       items={roles}
       folders={folders}
       onItemsChange={onRolesChange}
@@ -625,16 +627,23 @@ function DiscordRoleManager({
         existing: false,
         folderId,
       })}
-      renderCells={(role, update) => (
-        <>
-          <ColorField color={role.color} onChange={(color) => update({ color })} />
-          <Input
-            value={role.name}
-            placeholder="Role name"
-            onChange={(event) => update({ name: event.target.value })}
-          />
-        </>
-      )}
+      renderCells={(role, update) => {
+        const folderColor = folderColorFor(role.folderId, folders);
+        return (
+          <>
+            {hasColor(folderColor) ? (
+              <InheritedColorField color={folderColor} />
+            ) : (
+              <ColorField color={role.color} onChange={(color) => update({ color })} />
+            )}
+            <Input
+              value={role.name}
+              placeholder="Role name"
+              onChange={(event) => update({ name: event.target.value })}
+            />
+          </>
+        );
+      }}
     />
   );
 }
@@ -648,6 +657,7 @@ function FolderedList<T extends FolderedItem>({
   headerCells,
   emptyLabel,
   addToTop,
+  enableFolderColor = false,
   items,
   folders,
   onItemsChange,
@@ -661,6 +671,7 @@ function FolderedList<T extends FolderedItem>({
   headerCells: React.ReactNode;
   emptyLabel: string;
   addToTop: boolean;
+  enableFolderColor?: boolean;
   items: T[];
   folders: Folder[];
   onItemsChange: (items: T[]) => void;
@@ -706,7 +717,7 @@ function FolderedList<T extends FolderedItem>({
   };
 
   const addFolder = () => {
-    onFoldersChange([...folders, { id: crypto.randomUUID(), name: "New folder", collapsed: false }]);
+    onFoldersChange([...folders, { id: crypto.randomUUID(), name: "New folder", collapsed: false, color: 0 }]);
   };
 
   const updateFolder = (id: string, patch: Partial<Folder>) => {
@@ -816,6 +827,12 @@ function FolderedList<T extends FolderedItem>({
                       className="h-8 max-w-xs"
                       onChange={(event) => updateFolder(folder.id, { name: event.target.value })}
                     />
+                    {enableFolderColor ? (
+                      <ColorField
+                        color={folder.color}
+                        onChange={(color) => updateFolder(folder.id, { color })}
+                      />
+                    ) : null}
                     <span className="text-xs text-muted-foreground">{folderItems.length}</span>
                     <div className="ml-auto flex gap-1">
                       <Button
@@ -952,6 +969,19 @@ function ColorField({
       >
         Clear
       </Button>
+    </div>
+  );
+}
+
+function InheritedColorField({ color }: { color: number }) {
+  return (
+    <div className="flex items-center gap-2" title="Color is shared from the folder">
+      <span
+        aria-hidden="true"
+        className="size-8 shrink-0 rounded-md border"
+        style={{ backgroundColor: colorToHex(color) }}
+      />
+      <span className="text-xs text-muted-foreground">Folder</span>
     </div>
   );
 }
@@ -1178,6 +1208,7 @@ function configToFolders(folders: ConfigFolder[]): Folder[] {
     id: crypto.randomUUID(),
     name: folder.name,
     collapsed: false,
+    color: folder.color ?? 0,
   }));
 }
 
@@ -1194,7 +1225,18 @@ function foldersToConfig<T extends FolderedItem>(
         .filter((item) => item.folderId === folder.id)
         .map(keyOf)
         .filter(Boolean),
+      ...(hasColor(folder.color) ? { color: folder.color } : {}),
     }));
+}
+
+function folderColorFor(folderId: string | null, folders: Folder[]): number {
+  if (!folderId) return 0;
+  return folders.find((folder) => folder.id === folderId)?.color ?? 0;
+}
+
+function effectiveRoleColor(role: RoleItem, folders: Folder[]): number {
+  const folderColor = folderColorFor(role.folderId, folders);
+  return hasColor(folderColor) ? folderColor : role.color;
 }
 
 function assignFolders<T>(
