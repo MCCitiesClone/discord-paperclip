@@ -6,7 +6,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   Circle,
   Copy,
   Folder as FolderIcon,
@@ -688,10 +687,17 @@ function FolderedList<T extends FolderedItem>({
     folderId: string | null;
     position: "before" | "after" | "into";
   } | null>(null);
+  const [folderDragId, setFolderDragId] = useState<string | null>(null);
+  const [folderDropHint, setFolderDropHint] = useState<{
+    id: string;
+    position: "before" | "after";
+  } | null>(null);
 
   const resetDrag = () => {
     setDragId(null);
     setDropHint(null);
+    setFolderDragId(null);
+    setFolderDropHint(null);
   };
 
   const moveItemTo = (
@@ -730,6 +736,45 @@ function FolderedList<T extends FolderedItem>({
     resetDrag();
   };
 
+  const reorderFolderTo = (id: string, targetId: string, position: "before" | "after") => {
+    if (id === targetId) return;
+    const dragged = folders.find((folder) => folder.id === id);
+    if (!dragged) return;
+    const rest = folders.filter((folder) => folder.id !== id);
+    let target = rest.findIndex((folder) => folder.id === targetId);
+    if (target < 0) return;
+    if (position === "after") target += 1;
+    const nextFolders = [...rest.slice(0, target), dragged, ...rest.slice(target)];
+    onFoldersChange(nextFolders);
+    onItemsChange(reflow(items, nextFolders));
+  };
+
+  const headerDragOver = (folder: Folder) => (event: React.DragEvent) => {
+    if (folderDragId) {
+      if (folderDragId === folder.id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = event.currentTarget.getBoundingClientRect();
+      const position = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+      setFolderDropHint({ id: folder.id, position });
+      return;
+    }
+    zoneDragOver(folder.id)(event);
+  };
+
+  const headerDrop = (folder: Folder) => (event: React.DragEvent) => {
+    if (folderDragId) {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = event.currentTarget.getBoundingClientRect();
+      const position = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+      reorderFolderTo(folderDragId, folder.id, position);
+      resetDrag();
+      return;
+    }
+    zoneDrop(folder.id)(event);
+  };
+
   const addItem = (folderId: string | null) => {
     const created = makeItem(folderId);
     const next = addToTop ? [created, ...items] : [...items, created];
@@ -750,15 +795,6 @@ function FolderedList<T extends FolderedItem>({
 
   const updateFolder = (id: string, patch: Partial<Folder>) => {
     onFoldersChange(folders.map((folder) => (folder.id === id ? { ...folder, ...patch } : folder)));
-  };
-
-  const moveFolder = (id: string, direction: -1 | 1) => {
-    const index = folders.findIndex((folder) => folder.id === id);
-    const target = index + direction;
-    if (target < 0 || target >= folders.length) return;
-    const nextFolders = move(folders, index, direction);
-    onFoldersChange(nextFolders);
-    onItemsChange(reflow(items, nextFolders));
   };
 
   const removeFolder = (id: string) => {
@@ -872,19 +908,38 @@ function FolderedList<T extends FolderedItem>({
                 </div>
               ) : null}
             </div>
-            {folders.map((folder, index) => {
+            {folders.map((folder) => {
               const folderItems = items.filter((item) => item.folderId === folder.id);
               return (
                 <div key={folder.id}>
                   <div
-                    className={`flex min-w-[680px] items-center gap-2 border-b bg-muted/50 px-4 py-2 ${
+                    className={`relative flex min-w-[680px] items-center gap-2 border-b bg-muted/50 px-4 py-2 ${
                       dropHint?.folderId === folder.id && dropHint.position === "into"
                         ? "ring-2 ring-inset ring-primary"
                         : ""
                     }`}
-                    onDragOver={zoneDragOver(folder.id)}
-                    onDrop={zoneDrop(folder.id)}
+                    onDragOver={headerDragOver(folder)}
+                    onDrop={headerDrop(folder)}
                   >
+                    {folderDropHint?.id === folder.id && folderDropHint.position === "before" ? (
+                      <div className="pointer-events-none absolute inset-x-0 -top-px z-10 h-0.5 bg-primary" />
+                    ) : null}
+                    {folderDropHint?.id === folder.id && folderDropHint.position === "after" ? (
+                      <div className="pointer-events-none absolute inset-x-0 -bottom-px z-10 h-0.5 bg-primary" />
+                    ) : null}
+                    <span
+                      draggable
+                      onDragStart={(event) => {
+                        setFolderDragId(folder.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", folder.id);
+                      }}
+                      onDragEnd={resetDrag}
+                      className="flex size-7 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing"
+                      aria-label="Drag to reorder folder"
+                    >
+                      <GripVertical className="size-4" />
+                    </span>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -918,11 +973,6 @@ function FolderedList<T extends FolderedItem>({
                       >
                         <Plus />
                       </Button>
-                      <OrderButtons
-                        index={index}
-                        count={folders.length}
-                        onMove={(direction) => moveFolder(folder.id, direction)}
-                      />
                       <Button
                         variant="ghost"
                         size="icon"
@@ -952,41 +1002,6 @@ function FolderedList<T extends FolderedItem>({
         )}
       </div>
     </Card>
-  );
-}
-
-function OrderButtons({
-  index,
-  count,
-  onMove,
-}: {
-  index: number;
-  count: number;
-  onMove: (direction: -1 | 1) => void;
-}) {
-  return (
-    <div className="flex gap-1">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7"
-        aria-label="Move up"
-        disabled={index === 0}
-        onClick={() => onMove(-1)}
-      >
-        <ChevronUp />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7"
-        aria-label="Move down"
-        disabled={index === count - 1}
-        onClick={() => onMove(1)}
-      >
-        <ChevronDown />
-      </Button>
-    </div>
   );
 }
 
@@ -1321,16 +1336,6 @@ function assignFolders<T>(
       const secondRank = rankByKey.get(keyOf(second)) ?? Number.MAX_SAFE_INTEGER;
       return firstRank - secondRank;
     });
-}
-
-function move<T>(list: T[], index: number, direction: -1 | 1): T[] {
-  const target = index + direction;
-  if (target < 0 || target >= list.length) {
-    return list;
-  }
-  const next = [...list];
-  [next[index], next[target]] = [next[target], next[index]];
-  return next;
 }
 
 function uniqueSorted(values: string[]) {
