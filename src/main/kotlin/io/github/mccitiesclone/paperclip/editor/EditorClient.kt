@@ -43,17 +43,27 @@ import java.util.concurrent.ExecutionException
 import java.util.logging.Logger
 
 class EditorClient(
-    private val config: PaperclipConfig,
+    initialConfig: PaperclipConfig,
     dataFolder: Path,
     private val logger: Logger,
     private val availableGroups: () -> List<GroupInfo>,
     private val availableDiscordRoles: () -> List<DiscordRole>,
 ) {
-    private val client = editorHttpClient(config.editor, dataFolder, logger)
-    private val bytebin = BytebinClient(client, config.editor.bytebinUrl)
+    @Volatile
+    private var config: PaperclipConfig = initialConfig
+    private val client = editorHttpClient(initialConfig.editor, dataFolder, logger)
+    private val bytebin = BytebinClient(client, initialConfig.editor.bytebinUrl)
     private val json = Json { ignoreUnknownKeys = true }
     private val activeSessions = ConcurrentHashMap<String, ActiveEditorSession>()
     private val pendingTrust = ConcurrentHashMap<String, PendingEditorTrust>()
+    private val trustedEditorKeys = ConcurrentHashMap.newKeySet<String>().apply {
+        addAll(initialConfig.editor.trustedEditorKeys)
+    }
+
+    fun refreshConfig(newConfig: PaperclipConfig) {
+        config = newConfig
+        trustedEditorKeys.addAll(newConfig.editor.trustedEditorKeys)
+    }
 
     fun createSession(applyChanges: (EditorResult) -> EditorResult): CompletableFuture<EditorSession> {
         if (config.editor.baseUrl.isBlank()) {
@@ -103,6 +113,7 @@ class EditorClient(
         session.trusted = true
         session.sendHelloReply(accepted = true, trustRequired = false)
         val fingerprint = fingerprint(editorKey)
+        trustedEditorKeys += fingerprint
         logger.info("Trusted editor key $fingerprint for session ${session.bytebinId}")
         return fingerprint
     }
@@ -403,7 +414,7 @@ class EditorClient(
         session.editorPublicKey = editorKey
         session.editorNonce = nonce
 
-        val trusted = fingerprint(editorKey) in config.editor.trustedEditorKeys
+        val trusted = fingerprint(editorKey) in trustedEditorKeys
         session.trusted = trusted
         if (trusted) {
             session.sendHelloReply(accepted = true, trustRequired = false)

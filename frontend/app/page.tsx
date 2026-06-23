@@ -103,6 +103,21 @@ export default function Home() {
   const privateKeyRef = useRef<CryptoKey | null>(null);
   const serverKeyRef = useRef<CryptoKey | null>(null);
   const autoConnectSessionRef = useRef("");
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopHeartbeat = useCallback(() => {
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopHeartbeat();
+      socketRef.current?.close();
+    };
+  }, [stopHeartbeat]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -196,6 +211,7 @@ export default function Home() {
       return;
     }
 
+    stopHeartbeat();
     socketRef.current?.close();
     setState("loading");
     setNotice("Loading editor payload...");
@@ -230,6 +246,14 @@ export default function Home() {
           browser: "discord-paperclip-next",
           publicKey: browserPublicKeyText,
         });
+        stopHeartbeat();
+        pingIntervalRef.current = setInterval(() => {
+          const current = socketRef.current;
+          if (!current || current.readyState !== WebSocket.OPEN) {
+            return;
+          }
+          void sendPacket({ type: "ping" }).catch(() => {});
+        }, 25000);
       });
 
       socket.addEventListener("message", async (event) => {
@@ -273,11 +297,13 @@ export default function Home() {
       });
 
       socket.addEventListener("close", () => {
+        stopHeartbeat();
         setState((current) => (current === "connected" ? "idle" : current));
         setNotice("Relay channel closed.");
       });
 
       socket.addEventListener("error", () => {
+        stopHeartbeat();
         setState("error");
         setNotice("WebSocket relay failed.");
       });
@@ -285,7 +311,7 @@ export default function Home() {
       setState("error");
       setNotice(error instanceof Error ? error.message : "Could not load editor session.");
     }
-  }, [loadSessionData, sendPacket, sessionId]);
+  }, [loadSessionData, sendPacket, sessionId, stopHeartbeat]);
 
   useEffect(() => {
     const trimmedSession = sessionId.trim();

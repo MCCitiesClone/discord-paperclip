@@ -75,7 +75,7 @@ class PaperclipCommand(
 
         if (plugin.server.isPrimaryThread) {
             val refreshed = plugin.applyEditorUpdate(result)
-            plugin.server.scheduler.runTaskLater(plugin, Runnable { reloadAction() }, 40L)
+            plugin.server.scheduler.runTaskLater(plugin, Runnable { plugin.refreshAfterEditorApply() }, 40L)
             return refreshed
         }
 
@@ -83,7 +83,7 @@ class PaperclipCommand(
         plugin.server.scheduler.runTask(plugin, Runnable {
             runCatching {
                 val refreshed = plugin.applyEditorUpdate(result)
-                plugin.server.scheduler.runTaskLater(plugin, Runnable { reloadAction() }, 40L)
+                plugin.server.scheduler.runTaskLater(plugin, Runnable { plugin.refreshAfterEditorApply() }, 40L)
                 refreshed
             }.fold(future::complete, future::completeExceptionally)
         })

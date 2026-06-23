@@ -118,6 +118,30 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         saveConfig()
     }
 
+    /**
+     * Refresh derived state after an editor apply without tearing down the editor client.
+     * A full reload via [reloadPlugin] closes every active websocket session, which would
+     * disconnect the editor that just sent the changes. This reloads the config from disk,
+     * refreshes the editor client's in-memory mappings/trusted keys, and recreates the
+     * sync service so new mappings take effect immediately.
+     */
+    fun refreshAfterEditorApply() {
+        reloadConfig()
+        pluginConfig = PaperclipConfig.from(config)
+
+        if (::editorClient.isInitialized) {
+            editorClient.refreshConfig(pluginConfig)
+        }
+
+        if (::syncService.isInitialized) {
+            syncService.shutdown()
+            HandlerList.unregisterAll(syncService)
+        }
+        syncService = SyncService(this, pluginConfig, luckPermsService, discordService, logger)
+        server.pluginManager.registerEvents(syncService, this)
+        syncService.start()
+    }
+
     private fun loadServices() {
         pluginConfig = PaperclipConfig.from(config)
         luckPermsService = LuckPermsService(logger)
