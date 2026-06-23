@@ -11,6 +11,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpHeaders
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.net.http.WebSocket
 import java.net.http.WebSocketHandshakeException
 import java.nio.file.Path
@@ -22,6 +24,7 @@ import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
+import java.time.Duration
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
@@ -54,27 +57,29 @@ class EditorClient(
             return CompletableFuture.failedFuture(IllegalStateException("editor.bytesocks-url is not configured"))
         }
 
-        val channelId = UUID.randomUUID().toString().replace("-", "")
-        val keyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
-        val initialPayload = initialPayloadJson(channelId, keyPair.public).toString()
+        return createBytesocksChannel()
+            .thenCompose { channelId ->
+                val keyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+                val initialPayload = initialPayloadJson(channelId, keyPair.public).toString()
 
-        return uploadPayload(initialPayload)
-            .thenCompose { payloadId ->
-                val session = ActiveEditorSession(
-                    bytebinId = payloadId,
-                    channelId = channelId,
-                    privateKey = keyPair.private,
-                    publicKey = keyPair.public,
-                    applyChanges = applyChanges,
-                )
-                activeSessions[payloadId] = session
-                connectSocket(session).thenApply {
-                    EditorSession(
-                        sessionId = payloadId,
-                        editorUrl = "${config.editor.baseUrl}/?session=$payloadId",
-                        channelId = channelId,
-                    )
-                }
+                uploadPayload(initialPayload)
+                    .thenCompose { payloadId ->
+                        val session = ActiveEditorSession(
+                            bytebinId = payloadId,
+                            channelId = channelId,
+                            privateKey = keyPair.private,
+                            publicKey = keyPair.public,
+                            applyChanges = applyChanges,
+                        )
+                        activeSessions[payloadId] = session
+                        connectSocket(session).thenApply {
+                            EditorSession(
+                                sessionId = payloadId,
+                                editorUrl = "${config.editor.baseUrl}/?session=$payloadId",
+                                channelId = channelId,
+                            )
+                        }
+                    }
             }
     }
 
@@ -110,6 +115,53 @@ class EditorClient(
             .exceptionally { throwable ->
                 throw describeSocketFailure(uri, throwable)
             }
+    }
+
+    private fun createBytesocksChannel(): CompletableFuture<String> {
+        val request = HttpRequest.newBuilder(URI.create("${config.editor.bytesocksUrl.trimEnd('/')}/create"))
+            .timeout(Duration.ofSeconds(15))
+            .header("User-Agent", "DiscordPaperclip/editor")
+            .GET()
+            .build()
+
+        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenApply { response ->
+                if (response.statusCode() !in 200..299) {
+                    throw IllegalStateException("bytesocks returned HTTP ${response.statusCode()} when creating a channel")
+                }
+                parseCreateChannelResponse(response)
+            }
+    }
+
+    private fun parseCreateChannelResponse(response: HttpResponse<String>): String {
+        val locationKey = response.headers().firstValue("Location")
+            .map(::extractPathKey)
+            .filter { it.isNotBlank() }
+            .orElse(null)
+        if (locationKey != null) {
+            return locationKey
+        }
+
+        val body = response.body().orEmpty().trim()
+        if (body.isBlank()) {
+            throw IllegalStateException("bytesocks create response did not include a Location header or response body")
+        }
+
+        return json.parseToJsonElement(body).jsonObject["key"]?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("bytesocks create response did not include Location or key")
+    }
+
+    private fun extractPathKey(value: String): String {
+        val trimmed = value.trim().trimEnd('/')
+        if (!trimmed.contains('/')) {
+            return trimmed
+        }
+        return runCatching {
+            URI.create(trimmed).path.trim('/').substringAfterLast('/')
+        }.getOrElse {
+            trimmed.substringAfterLast('/')
+        }
     }
 
     private fun describeSocketFailure(uri: URI, throwable: Throwable): IllegalStateException {
