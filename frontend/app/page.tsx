@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  DiscordRole,
   EditableConfig,
   SessionPayload,
   SignedFrame,
@@ -57,6 +58,7 @@ export default function Home() {
   const [groupRows, setGroupRows] = useState<Row[]>([]);
   const [accountRows, setAccountRows] = useState<Row[]>([]);
   const [availableGroups, setAvailableGroups] = useState<string[]>([]);
+  const [availableRoles, setAvailableRoles] = useState<DiscordRole[]>([]);
   const [nonce, setNonce] = useState("");
   const [lastApplied, setLastApplied] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
@@ -121,6 +123,7 @@ export default function Home() {
       setGroupRows(mapToRows(loaded.config.groupRoleMap));
       setAccountRows(mapToRows(loaded.config.linkedAccounts));
       setAvailableGroups(uniqueSorted([...(loaded.availableGroups ?? []), ...Object.keys(loaded.config.groupRoleMap)]));
+      setAvailableRoles(uniqueRoles([...(loaded.availableDiscordRoles ?? []), ...unknownRoles(loaded.config.groupRoleMap)]));
 
       const keys = await generateEditorKeys();
       privateKeyRef.current = keys.privateKey;
@@ -247,9 +250,10 @@ export default function Home() {
           <EditorTable
             title="Group Role Map"
             leftLabel="LuckPerms group"
-            rightLabel="Discord role ID"
+            rightLabel="Discord role"
             rows={groupRows}
             leftOptions={availableGroups}
+            rightRoleOptions={availableRoles}
             onChange={setGroupRows}
           />
           <EditorTable
@@ -348,6 +352,7 @@ function EditorTable({
   rightLabel,
   rows,
   leftOptions,
+  rightRoleOptions,
   onChange,
 }: {
   title: string;
@@ -355,6 +360,7 @@ function EditorTable({
   rightLabel: string;
   rows: Row[];
   leftOptions?: string[];
+  rightRoleOptions?: DiscordRole[];
   onChange: (rows: Row[]) => void;
 }) {
   const updateRow = (id: string, patch: Partial<Row>) => {
@@ -394,7 +400,15 @@ function EditorTable({
               ) : (
                 <Input value={row.left} onChange={(event) => updateRow(row.id, { left: event.target.value })} />
               )}
-              <Input value={row.right} onChange={(event) => updateRow(row.id, { right: event.target.value })} />
+              {rightRoleOptions ? (
+                <RoleSelect
+                  value={row.right}
+                  options={rightRoleOptions}
+                  onChange={(value) => updateRow(row.id, { right: value })}
+                />
+              ) : (
+                <Input value={row.right} onChange={(event) => updateRow(row.id, { right: event.target.value })} />
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -440,6 +454,45 @@ function GroupSelect({
   );
 }
 
+function RoleSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: DiscordRole[];
+  onChange: (value: string) => void;
+}) {
+  const selectOptions = uniqueRoles(value ? [...options, { id: value, name: `Unknown role (${value})` }] : options);
+  const selectedRole = selectOptions.find((role) => role.id === value);
+
+  return (
+    <div className="relative">
+      {selectedRole ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 size-3 -translate-y-1/2 rounded-full border"
+          style={{ backgroundColor: roleColor(selectedRole) }}
+        />
+      ) : null}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="flex h-10 w-full rounded-md border border-input bg-background py-2 pl-8 pr-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <option value="" disabled>
+          Select a Discord role
+        </option>
+        {selectOptions.map((role) => (
+          <option key={role.id} value={role.id}>
+            {role.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function mapToRows(map: Record<string, string>) {
   return Object.entries(map).map(([left, right]) => ({
     id: crypto.randomUUID(),
@@ -463,4 +516,29 @@ function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((first, second) =>
     first.localeCompare(second),
   );
+}
+
+function uniqueRoles(roles: DiscordRole[]) {
+  const byId = new Map<string, DiscordRole>();
+  roles.forEach((role) => {
+    const id = role.id.trim();
+    const name = role.name.trim();
+    if (id && name && !byId.has(id)) {
+      byId.set(id, { ...role, id, name });
+    }
+  });
+  return Array.from(byId.values()).sort((first, second) =>
+    first.name.localeCompare(second.name) || first.id.localeCompare(second.id),
+  );
+}
+
+function unknownRoles(groupRoleMap: Record<string, string>) {
+  return Object.values(groupRoleMap).map((id) => ({ id, name: `Unknown role (${id})` }));
+}
+
+function roleColor(role: DiscordRole) {
+  if (!role.color || role.color < 0 || role.color > 0xffffff) {
+    return "transparent";
+  }
+  return `#${role.color.toString(16).padStart(6, "0")}`;
 }

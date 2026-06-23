@@ -1,6 +1,7 @@
 package io.github.mccitiesclone.paperclip.editor
 
 import io.github.mccitiesclone.paperclip.PaperclipConfig
+import io.github.mccitiesclone.paperclip.discord.DiscordRole
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -41,6 +42,7 @@ class EditorClient(
     dataFolder: Path,
     private val logger: Logger,
     private val availableGroupNames: () -> Set<String>,
+    private val availableDiscordRoles: () -> List<DiscordRole>,
 ) {
     private val client = editorHttpClient(config.editor, dataFolder, logger)
     private val bytebin = BytebinClient(client, config.editor.bytebinUrl)
@@ -231,6 +233,7 @@ class EditorClient(
             put("channelId", JsonPrimitive(channelId))
             put("serverPublicKey", JsonPrimitive(encodeKey(publicKey)))
             put("availableGroups", availableGroupsJson())
+            put("availableDiscordRoles", availableDiscordRolesJson())
             put("config", editableConfigJson())
         }
 
@@ -240,6 +243,19 @@ class EditorClient(
                 .filter { it.isNotBlank() }
                 .sorted()
                 .map { JsonPrimitive(it) }
+        )
+
+    private fun availableDiscordRolesJson(): JsonArray =
+        JsonArray(
+            availableDiscordRoles()
+                .filter { it.id.isNotBlank() && it.name.isNotBlank() }
+                .map { role ->
+                    buildJsonObject {
+                        put("id", JsonPrimitive(role.id))
+                        put("name", JsonPrimitive(role.name))
+                        put("color", JsonPrimitive(role.color))
+                    }
+                }
         )
 
     private fun editableConfigJson(): JsonObject =

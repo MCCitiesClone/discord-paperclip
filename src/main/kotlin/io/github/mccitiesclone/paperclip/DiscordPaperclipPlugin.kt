@@ -104,7 +104,13 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         luckPermsService = LuckPermsService(logger)
         discordService = DiscordService(pluginConfig, logger)
         syncService = SyncService(this, pluginConfig, luckPermsService, discordService, logger)
-        editorClient = EditorClient(pluginConfig, dataFolder.toPath(), logger, luckPermsService::availableGroupNames)
+        editorClient = EditorClient(
+            pluginConfig,
+            dataFolder.toPath(),
+            logger,
+            luckPermsService::availableGroupNames,
+            discordService::availableRoles,
+        )
         linkService = LinkService(pluginConfig, dataFolder.toPath(), logger, ::completeAccountLink)
 
         discordService.start(syncService::handleDiscordMemberRoleUpdate, linkService::completeCode)

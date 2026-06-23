@@ -10,7 +10,14 @@ export type SessionPayload = {
   channelId: string;
   serverPublicKey: string;
   availableGroups?: string[];
+  availableDiscordRoles?: DiscordRole[];
   config: EditableConfig;
+};
+
+export type DiscordRole = {
+  id: string;
+  name: string;
+  color?: number;
 };
 
 export type SignedFrame = {

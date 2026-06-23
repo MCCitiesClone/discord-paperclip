@@ -65,6 +65,16 @@ class DiscordService(
         return future
     }
 
+    fun availableRoles(): List<DiscordRole> =
+        guild()
+            ?.roles
+            ?.asSequence()
+            ?.filterNot { it.isPublicRole || it.isManaged }
+            ?.map { role -> DiscordRole(id = role.id, name = role.name, color = role.colorRaw) }
+            ?.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, DiscordRole::name).thenBy(DiscordRole::id))
+            ?.toList()
+            ?: emptyList()
+
     fun setRoles(discordUserId: String, desiredRoleIds: Set<String>, managedRoleIds: Set<String>): CompletableFuture<Void> {
         val guild = guild() ?: return CompletableFuture.completedFuture(null)
         val future = CompletableFuture<Void>()
@@ -117,6 +127,12 @@ class DiscordService(
         return currentJda.getGuildById(config.guildId)
     }
 }
+
+data class DiscordRole(
+    val id: String,
+    val name: String,
+    val color: Int,
+)
 
 private class RoleChangeListener(
     private val guildId: String,
