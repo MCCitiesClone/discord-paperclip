@@ -11,6 +11,7 @@ import {
   Copy,
   Folder as FolderIcon,
   FolderPlus,
+  GripVertical,
   Palette,
   Plus,
   RefreshCw,
@@ -679,7 +680,55 @@ function FolderedList<T extends FolderedItem>({
   makeItem: (folderId: string | null) => T;
   renderCells: (item: T, update: (patch: Partial<T>) => void) => React.ReactNode;
 }) {
-  const gridColumns = `64px ${columnTemplate} 150px 48px`;
+  const gridColumns = `96px ${columnTemplate} 150px 48px`;
+
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{
+    id: string | null;
+    folderId: string | null;
+    position: "before" | "after" | "into";
+  } | null>(null);
+
+  const resetDrag = () => {
+    setDragId(null);
+    setDropHint(null);
+  };
+
+  const moveItemTo = (
+    id: string,
+    folderId: string | null,
+    targetId: string | null,
+    position: "before" | "after",
+  ) => {
+    const dragged = items.find((item) => item.id === id);
+    if (!dragged) return;
+    const updated = { ...dragged, folderId };
+    const rest = items.filter((item) => item.id !== id);
+    if (targetId === null || targetId === id) {
+      onItemsChange(reflow([...rest, updated], folders));
+      return;
+    }
+    let target = rest.findIndex((item) => item.id === targetId);
+    if (target < 0) {
+      onItemsChange(reflow([...rest, updated], folders));
+      return;
+    }
+    if (position === "after") target += 1;
+    onItemsChange(reflow([...rest.slice(0, target), updated, ...rest.slice(target)], folders));
+  };
+
+  const zoneDragOver = (folderId: string | null) => (event: React.DragEvent) => {
+    if (!dragId) return;
+    event.preventDefault();
+    setDropHint({ id: null, folderId, position: "into" });
+  };
+
+  const zoneDrop = (folderId: string | null) => (event: React.DragEvent) => {
+    if (!dragId) return;
+    event.preventDefault();
+    moveItemTo(dragId, folderId, null, "after");
+    resetDrag();
+  };
 
   const addItem = (folderId: string | null) => {
     const created = makeItem(folderId);
@@ -741,33 +790,77 @@ function FolderedList<T extends FolderedItem>({
   };
 
   const renderRows = (subset: T[]) =>
-    subset.map((item, index) => (
-      <div
-        key={item.id}
-        className="grid min-w-[680px] items-center gap-3 border-b px-4 py-3 last:border-b-0"
-        style={{ gridTemplateColumns: gridColumns }}
-      >
-        <OrderButtons
-          index={index}
-          count={subset.length}
-          onMove={(direction) => moveItem(item.id, direction)}
-        />
-        {renderCells(item, (patch) => updateItem(item.id, patch))}
-        <FolderSelect
-          value={item.folderId}
-          folders={folders}
-          onChange={(folderId) => assignFolder(item.id, folderId)}
-        />
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Remove"
-          onClick={() => removeItem(item.id)}
+    subset.map((item, index) => {
+      const dropBefore = dropHint?.id === item.id && dropHint.position === "before";
+      const dropAfter = dropHint?.id === item.id && dropHint.position === "after";
+      const rowDragOver = (event: React.DragEvent) => {
+        if (!dragId || dragId === item.id) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const position = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+        setDropHint({ id: item.id, folderId: item.folderId, position });
+      };
+      const rowDrop = (event: React.DragEvent) => {
+        if (!dragId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const position = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+        moveItemTo(dragId, item.folderId, item.id, position);
+        resetDrag();
+      };
+      return (
+        <div
+          key={item.id}
+          className="relative grid min-w-[680px] items-center gap-3 border-b px-4 py-3 last:border-b-0"
+          style={{ gridTemplateColumns: gridColumns }}
+          onDragOver={rowDragOver}
+          onDrop={rowDrop}
         >
-          <Trash2 />
-        </Button>
-      </div>
-    ));
+          {dropBefore ? (
+            <div className="pointer-events-none absolute inset-x-0 -top-px z-10 h-0.5 bg-primary" />
+          ) : null}
+          {dropAfter ? (
+            <div className="pointer-events-none absolute inset-x-0 -bottom-px z-10 h-0.5 bg-primary" />
+          ) : null}
+          <div className="flex items-center gap-1">
+            <span
+              draggable
+              onDragStart={(event) => {
+                setDragId(item.id);
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", item.id);
+              }}
+              onDragEnd={resetDrag}
+              className="flex size-7 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing"
+              aria-label="Drag to reorder"
+            >
+              <GripVertical className="size-4" />
+            </span>
+            <OrderButtons
+              index={index}
+              count={subset.length}
+              onMove={(direction) => moveItem(item.id, direction)}
+            />
+          </div>
+          {renderCells(item, (patch) => updateItem(item.id, patch))}
+          <FolderSelect
+            value={item.folderId}
+            folders={folders}
+            onChange={(folderId) => assignFolder(item.id, folderId)}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Remove"
+            onClick={() => removeItem(item.id)}
+          >
+            <Trash2 />
+          </Button>
+        </div>
+      );
+    });
 
   const ungrouped = items.filter(
     (item) => item.folderId === null || !folders.some((folder) => folder.id === item.folderId),
@@ -805,12 +898,27 @@ function FolderedList<T extends FolderedItem>({
           <div className="px-4 py-8 text-sm text-muted-foreground">{emptyLabel}</div>
         ) : (
           <>
-            {renderRows(ungrouped)}
+            <div onDragOver={zoneDragOver(null)} onDrop={zoneDrop(null)}>
+              {renderRows(ungrouped)}
+              {folders.length > 0 && ungrouped.length === 0 && dragId ? (
+                <div className="min-w-[680px] border-b px-4 py-4 pl-12 text-sm text-muted-foreground">
+                  Drop here to remove from folder.
+                </div>
+              ) : null}
+            </div>
             {folders.map((folder, index) => {
               const folderItems = items.filter((item) => item.folderId === folder.id);
               return (
                 <div key={folder.id}>
-                  <div className="flex min-w-[680px] items-center gap-2 border-b bg-muted/50 px-4 py-2">
+                  <div
+                    className={`flex min-w-[680px] items-center gap-2 border-b bg-muted/50 px-4 py-2 ${
+                      dropHint?.folderId === folder.id && dropHint.position === "into"
+                        ? "ring-2 ring-inset ring-primary"
+                        : ""
+                    }`}
+                    onDragOver={zoneDragOver(folder.id)}
+                    onDrop={zoneDrop(folder.id)}
+                  >
                     <Button
                       variant="ghost"
                       size="icon"
@@ -861,7 +969,11 @@ function FolderedList<T extends FolderedItem>({
                     </div>
                   </div>
                   {folder.collapsed ? null : folderItems.length === 0 ? (
-                    <div className="min-w-[680px] px-4 py-4 pl-12 text-sm text-muted-foreground">
+                    <div
+                      className="min-w-[680px] px-4 py-4 pl-12 text-sm text-muted-foreground"
+                      onDragOver={zoneDragOver(folder.id)}
+                      onDrop={zoneDrop(folder.id)}
+                    >
                       Empty folder.
                     </div>
                   ) : (
