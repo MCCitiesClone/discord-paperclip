@@ -6,7 +6,6 @@ import {
   Check,
   Circle,
   Copy,
-  Link2,
   Plus,
   RefreshCw,
   Save,
@@ -17,7 +16,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   EditableConfig,
@@ -48,15 +46,13 @@ type Row = {
   right: string;
 };
 
-const defaultBytebinUrl = process.env.NEXT_PUBLIC_BYTEBIN_URL ?? "";
-const defaultBytesocksUrl = process.env.NEXT_PUBLIC_BYTESOCKS_URL ?? "";
+const bytebinUrl = process.env.NEXT_PUBLIC_BYTEBIN_URL ?? "";
+const bytesocksUrl = process.env.NEXT_PUBLIC_BYTESOCKS_URL ?? "";
 
 export default function Home() {
   const [sessionId, setSessionId] = useState("");
-  const [bytebinUrl, setBytebinUrl] = useState(defaultBytebinUrl);
-  const [bytesocksUrl, setBytesocksUrl] = useState(defaultBytesocksUrl);
   const [state, setState] = useState<ConnectionState>("idle");
-  const [notice, setNotice] = useState("Paste a session ID or open the URL from /paperclip editor.");
+  const [notice, setNotice] = useState("Open the editor URL from /paperclip editor.");
   const [payload, setPayload] = useState<SessionPayload | null>(null);
   const [groupRows, setGroupRows] = useState<Row[]>([]);
   const [accountRows, setAccountRows] = useState<Row[]>([]);
@@ -65,24 +61,16 @@ export default function Home() {
   const socketRef = useRef<WebSocket | null>(null);
   const privateKeyRef = useRef<CryptoKey | null>(null);
   const serverKeyRef = useRef<CryptoKey | null>(null);
+  const autoConnectSessionRef = useRef("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const querySession = params.get("session") ?? "";
-    const savedBytebin = window.localStorage.getItem("paperclip:bytebin");
-    const savedBytesocks = window.localStorage.getItem("paperclip:bytesocks");
     setSessionId(querySession);
-    if (savedBytebin && !defaultBytebinUrl) setBytebinUrl(savedBytebin);
-    if (savedBytesocks && !defaultBytesocksUrl) setBytesocksUrl(savedBytesocks);
+    if (!querySession) {
+      setNotice("Missing session in editor URL.");
+    }
   }, []);
-
-  useEffect(() => {
-    if (bytebinUrl) window.localStorage.setItem("paperclip:bytebin", bytebinUrl);
-  }, [bytebinUrl]);
-
-  useEffect(() => {
-    if (bytesocksUrl) window.localStorage.setItem("paperclip:bytesocks", bytesocksUrl);
-  }, [bytesocksUrl]);
 
   const expiresText = useMemo(() => {
     if (!payload) return "No session";
@@ -109,12 +97,12 @@ export default function Home() {
   const connect = useCallback(async () => {
     if (!sessionId.trim()) {
       setState("error");
-      setNotice("Missing session ID.");
+      setNotice("Missing session in editor URL.");
       return;
     }
     if (!bytebinUrl.trim() || !bytesocksUrl.trim()) {
       setState("error");
-      setNotice("Bytebin and bytesocks URLs are required for this hosted editor.");
+      setNotice("NEXT_PUBLIC_BYTEBIN_URL and NEXT_PUBLIC_BYTESOCKS_URL are required.");
       return;
     }
 
@@ -212,7 +200,16 @@ export default function Home() {
       setState("error");
       setNotice(error instanceof Error ? error.message : "Could not load editor session.");
     }
-  }, [bytebinUrl, bytesocksUrl, sendPacket, sessionId]);
+  }, [sendPacket, sessionId]);
+
+  useEffect(() => {
+    const trimmedSession = sessionId.trim();
+    if (!trimmedSession || autoConnectSessionRef.current === trimmedSession) {
+      return;
+    }
+    autoConnectSessionRef.current = trimmedSession;
+    void connect();
+  }, [connect, sessionId]);
 
   const applyChanges = useCallback(async () => {
     setState("applying");
@@ -225,7 +222,7 @@ export default function Home() {
       setState("connected");
       setNotice(error instanceof Error ? error.message : "Could not apply changes.");
     }
-  }, [bytebinUrl, config, sendPacket]);
+  }, [config, sendPacket]);
 
   return (
     <main className="min-h-screen">
@@ -239,36 +236,6 @@ export default function Home() {
               </p>
             </div>
             <StatusBadge state={state} />
-          </div>
-
-          <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
-            <Field label="Session">
-              <Input
-                value={sessionId}
-                onChange={(event) => setSessionId(event.target.value)}
-                placeholder="bytebin payload id"
-              />
-            </Field>
-            <Field label="Bytebin URL">
-              <Input
-                value={bytebinUrl}
-                onChange={(event) => setBytebinUrl(event.target.value)}
-                placeholder="https://bytebin.example.com"
-              />
-            </Field>
-            <Field label="Bytesocks URL">
-              <Input
-                value={bytesocksUrl}
-                onChange={(event) => setBytesocksUrl(event.target.value)}
-                placeholder="wss://bytesocks.example.com"
-              />
-            </Field>
-            <div className="flex items-end">
-              <Button className="w-full lg:w-auto" onClick={connect} disabled={state === "loading" || state === "connecting"}>
-                <Link2 />
-                Connect
-              </Button>
-            </div>
           </div>
         </div>
       </section>
@@ -298,6 +265,7 @@ export default function Home() {
               Session
             </div>
             <dl className="mt-4 grid gap-3 text-sm">
+              <InfoRow label="Payload" value={sessionId || "Not loaded"} />
               <InfoRow label="Expires" value={expiresText} />
               <InfoRow label="Channel" value={payload?.channelId ?? "Not loaded"} />
               <InfoRow label="Last applied" value={lastApplied || "None"} />
@@ -340,15 +308,6 @@ export default function Home() {
         </aside>
       </section>
     </main>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="grid gap-2">
-      <Label>{label}</Label>
-      {children}
-    </div>
   );
 }
 
