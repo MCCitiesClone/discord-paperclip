@@ -45,7 +45,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "9.6"
+          gradle-version: "9.6.0"
 
       - name: Build jar
         run: gradle build -PreleaseVersion=${{ steps.version.outputs.version }} --no-daemon
