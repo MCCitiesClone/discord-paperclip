@@ -36,6 +36,16 @@ The hosted editor follows the same broad shape as LuckPerms:
 - `editor.bytebin-url` is the bytebin base URL. Payloads are uploaded with `POST {editor.bytebin-url}/post`; LuckPerms-style services return the content key in the `Location` response header.
 - `GET {editor.bytebin-url}/{id}` returns a previously uploaded JSON payload.
 - `editor.bytesocks-url/{channelId}` is a WebSocket relay channel shared by the plugin and browser.
+- `editor.trusted-ca-certificates` can list PEM CA certificate files for private or
+  self-signed bytebin/bytesocks TLS. Relative paths are resolved from the plugin data folder.
+
+Example private CA configuration:
+
+```yaml
+editor:
+  trusted-ca-certificates:
+    - private-bytebin-ca.pem
+```
 
 For compatibility with simple bytebin clones, uploads also accept JSON response bodies with
 `key`, `id`, or `location`, and fall back to `POST {editor.bytebin-url}` when `/post` is not

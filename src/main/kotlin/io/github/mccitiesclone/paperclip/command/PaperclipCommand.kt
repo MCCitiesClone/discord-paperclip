@@ -7,6 +7,8 @@ import io.papermc.paper.command.brigadier.CommandSourceStack
 import org.bukkit.ChatColor
 import org.bukkit.command.CommandSender
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.concurrent.ExecutionException
 
 class PaperclipCommand(
     private val plugin: DiscordPaperclipPlugin,
@@ -40,7 +42,7 @@ class PaperclipCommand(
         sender.sendMessage("${ChatColor.GRAY}Creating hosted editor session...")
         plugin.editorClient.createSession(::applyEditorChanges).whenComplete { session, throwable ->
             if (throwable != null) {
-                sender.sendMessage("${ChatColor.RED}Could not create editor session: ${throwable.message}")
+                sender.sendMessage("${ChatColor.RED}Could not create editor session: ${editorErrorMessage(throwable)}")
                 return@whenComplete
             }
 
@@ -82,4 +84,21 @@ class PaperclipCommand(
         })
         return future.join()
     }
+
+    private fun editorErrorMessage(throwable: Throwable): String {
+        val cause = unwrap(throwable)
+        val message = cause.message ?: cause.javaClass.simpleName
+        return if (message.contains("PKIX path building failed", ignoreCase = true)) {
+            "$message. If your bytebin or bytesocks service uses a private CA, add its PEM certificate to editor.trusted-ca-certificates and run /paperclip reload."
+        } else {
+            message
+        }
+    }
+
+    private fun unwrap(throwable: Throwable): Throwable =
+        when (throwable) {
+            is CompletionException -> throwable.cause?.let(::unwrap) ?: throwable
+            is ExecutionException -> throwable.cause?.let(::unwrap) ?: throwable
+            else -> throwable
+        }
 }

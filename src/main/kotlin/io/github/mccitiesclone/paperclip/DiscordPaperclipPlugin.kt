@@ -80,7 +80,7 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         luckPermsService = LuckPermsService(logger)
         discordService = DiscordService(pluginConfig, logger)
         syncService = SyncService(this, pluginConfig, luckPermsService, discordService, logger)
-        editorClient = EditorClient(pluginConfig, logger)
+        editorClient = EditorClient(pluginConfig, dataFolder.toPath(), logger)
 
         discordService.start(syncService::handleDiscordMemberRoleUpdate)
         syncService.start()

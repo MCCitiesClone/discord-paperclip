@@ -44,6 +44,7 @@ data class PaperclipConfig(
                     bytebinUrl = config.getString("editor.bytebin-url").orEmpty().trimEnd('/'),
                     bytesocksUrl = config.getString("editor.bytesocks-url").orEmpty().trimEnd('/'),
                     sessionTtlSeconds = config.getLong("editor.session-ttl-seconds", 900L),
+                    trustedCaCertificates = config.getStringList("editor.trusted-ca-certificates"),
                     trustedEditorKeys = config.getStringList("editor.trusted-editor-keys").toSet(),
                 ),
                 linkedAccounts = linkedAccounts,
@@ -65,5 +66,6 @@ data class EditorSettings(
     val bytebinUrl: String,
     val bytesocksUrl: String,
     val sessionTtlSeconds: Long,
+    val trustedCaCertificates: List<String>,
     val trustedEditorKeys: Set<String>,
 )

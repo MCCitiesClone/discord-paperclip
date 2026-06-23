@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.WebSocket
+import java.nio.file.Path
 import java.nio.charset.StandardCharsets
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
@@ -29,9 +30,10 @@ import java.util.logging.Logger
 
 class EditorClient(
     private val config: PaperclipConfig,
+    dataFolder: Path,
     private val logger: Logger,
 ) {
-    private val client = HttpClient.newHttpClient()
+    private val client = editorHttpClient(config.editor, dataFolder, logger)
     private val bytebin = BytebinClient(client, config.editor.bytebinUrl)
     private val json = Json { ignoreUnknownKeys = true }
     private val activeSessions = ConcurrentHashMap<String, ActiveEditorSession>()

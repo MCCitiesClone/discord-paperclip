@@ -22,6 +22,9 @@ editor:
   # bytesocks-compatible WebSocket service. The channel ID is appended to this URL.
   bytesocks-url: "wss://bytesocks.example.com"
   session-ttl-seconds: 900
+  # Optional PEM CA certificates for private/self-signed bytebin or bytesocks TLS.
+  # Relative paths are resolved from the plugin data folder.
+  trusted-ca-certificates: []
   # SHA-256 fingerprints of trusted editor/browser public keys.
   trusted-editor-keys: []
 
