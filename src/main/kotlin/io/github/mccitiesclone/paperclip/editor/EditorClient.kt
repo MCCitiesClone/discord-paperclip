@@ -269,6 +269,7 @@ class EditorClient(
                 buildJsonObject {
                     put("name", JsonPrimitive(folder.name))
                     put("members", JsonArray(folder.members.map { JsonPrimitive(it) }))
+                    folder.color?.let { put("color", JsonPrimitive(it)) }
                 }
             }
         )
@@ -384,7 +385,8 @@ class EditorClient(
                 val members = obj["members"]?.jsonArray
                     ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.ifBlank { null } }
                     ?: emptyList()
-                ConfigFolder(name, members)
+                val color = obj["color"]?.jsonPrimitive?.intOrNull?.takeIf { it in 1..0xFFFFFF }
+                ConfigFolder(name, members, color)
             }
         } ?: emptyList()
 

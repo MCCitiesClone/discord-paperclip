@@ -72,7 +72,8 @@ data class PaperclipConfig(
                 val members = (raw["members"] as? List<*>)
                     ?.mapNotNull { (it as? String)?.trim()?.ifBlank { null } }
                     ?: emptyList()
-                ConfigFolder(name, members)
+                val color = (raw["color"] as? Number)?.toInt()?.takeIf { it in 1..0xFFFFFF }
+                ConfigFolder(name, members, color)
             }
 
         private fun normalizeWebSocketUrl(value: String): String {
@@ -88,10 +89,14 @@ data class PaperclipConfig(
     }
 }
 
-/** A visual folder grouping LuckPerms groups or Discord roles in the editor. Organizational only. */
+/**
+ * A visual folder grouping LuckPerms groups or Discord roles in the editor. Organizational only,
+ * except [color]: when set on a role folder it is the shared color applied to every child role.
+ */
 data class ConfigFolder(
     val name: String,
     val members: List<String>,
+    val color: Int? = null,
 )
 
 data class SyncSettings(
