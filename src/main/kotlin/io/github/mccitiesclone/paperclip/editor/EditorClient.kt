@@ -118,7 +118,7 @@ class EditorClient(
     }
 
     private fun createBytesocksChannel(): CompletableFuture<String> {
-        val request = HttpRequest.newBuilder(URI.create("${config.editor.bytesocksUrl.trimEnd('/')}/create"))
+        val request = HttpRequest.newBuilder(bytesocksHttpUri("create"))
             .timeout(Duration.ofSeconds(15))
             .header("User-Agent", "DiscordPaperclip/editor")
             .GET()
@@ -131,6 +131,27 @@ class EditorClient(
                 }
                 parseCreateChannelResponse(response)
             }
+    }
+
+    private fun bytesocksHttpUri(path: String): URI {
+        val baseUri = URI.create(config.editor.bytesocksUrl.trimEnd('/'))
+        val scheme = when (baseUri.scheme?.lowercase()) {
+            "wss" -> "https"
+            "ws" -> "http"
+            "https", "http" -> baseUri.scheme
+            else -> throw IllegalStateException("editor.bytesocks-url must use ws, wss, http, or https")
+        }
+        val basePath = baseUri.path?.trimEnd('/').orEmpty()
+        val requestPath = "$basePath/${path.trimStart('/')}"
+        return URI(
+            scheme,
+            baseUri.userInfo,
+            baseUri.host,
+            baseUri.port,
+            requestPath,
+            baseUri.query,
+            null,
+        )
     }
 
     private fun parseCreateChannelResponse(response: HttpResponse<String>): String {
