@@ -1,0 +1,22 @@
+name: DiscordPaperclip
+version: ${version}
+main: io.github.mccitiesclone.paperclip.DiscordPaperclipPlugin
+description: Bidirectionally sync LuckPerms groups with Discord roles.
+api-version: "1.21"
+authors:
+  - MCCitiesClone
+dependencies:
+  server:
+    LuckPerms:
+      load: BEFORE
+      required: true
+      join-classpath: true
+commands:
+  paperclip:
+    description: Manage Discord Paperclip.
+    usage: /paperclip <reload|sync|editor [trust <nonce>]>
+    permission: paperclip.admin
+permissions:
+  paperclip.admin:
+    description: Allows managing Discord Paperclip.
+    default: op

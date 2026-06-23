@@ -1,0 +1,125 @@
+package io.github.mccitiesclone.paperclip.discord
+
+import io.github.mccitiesclone.paperclip.PaperclipConfig
+import net.dv8tion.jda.api.JDA
+import net.dv8tion.jda.api.JDABuilder
+import net.dv8tion.jda.api.entities.Guild
+import net.dv8tion.jda.api.entities.Role
+import net.dv8tion.jda.api.entities.UserSnowflake
+import net.dv8tion.jda.api.events.guild.member.GuildMemberRoleAddEvent
+import net.dv8tion.jda.api.events.guild.member.GuildMemberRoleRemoveEvent
+import net.dv8tion.jda.api.hooks.ListenerAdapter
+import net.dv8tion.jda.api.requests.GatewayIntent
+import java.util.concurrent.CompletableFuture
+import java.util.logging.Logger
+
+class DiscordService(
+    private val config: PaperclipConfig,
+    private val logger: Logger,
+) {
+    @Volatile
+    private var jda: JDA? = null
+
+    fun start(roleUpdateHandler: (discordUserId: String) -> Unit) {
+        if (config.discordToken.isBlank() || config.discordToken == "replace-me") {
+            logger.warning("Discord token is not configured; Discord sync is disabled.")
+            return
+        }
+        if (config.guildId.isBlank() || config.guildId == "000000000000000000") {
+            logger.warning("Discord guild-id is not configured; Discord sync is disabled.")
+            return
+        }
+
+        jda = JDABuilder.createDefault(config.discordToken)
+            .enableIntents(GatewayIntent.GUILD_MEMBERS)
+            .addEventListeners(RoleChangeListener(config.guildId, roleUpdateHandler))
+            .build()
+    }
+
+    fun shutdown() {
+        jda?.shutdownNow()
+        jda = null
+    }
+
+    fun rolesFor(discordUserId: String): CompletableFuture<Set<String>> {
+        val guild = guild() ?: return CompletableFuture.completedFuture(emptySet())
+        val future = CompletableFuture<Set<String>>()
+        guild.retrieveMemberById(discordUserId).queue(
+            { member -> future.complete(member.roles.map { it.id }.toSet()) },
+            { throwable ->
+                logger.warning("Failed to load Discord member $discordUserId: ${throwable.message}")
+                future.complete(emptySet())
+            }
+        )
+        return future
+    }
+
+    fun setRoles(discordUserId: String, desiredRoleIds: Set<String>, managedRoleIds: Set<String>): CompletableFuture<Void> {
+        val guild = guild() ?: return CompletableFuture.completedFuture(null)
+        val future = CompletableFuture<Void>()
+        guild.retrieveMemberById(discordUserId).queue(
+            { member ->
+                val currentRoleIds = member.roles.map { it.id }.toSet()
+                val rolesToAdd = (desiredRoleIds - currentRoleIds).mapNotNull(guild::getRoleById)
+                val rolesToRemove = ((currentRoleIds intersect managedRoleIds) - desiredRoleIds).mapNotNull(guild::getRoleById)
+                applyRoleChanges(guild, discordUserId, rolesToAdd, rolesToRemove, future)
+            },
+            { throwable ->
+                logger.warning("Failed to load Discord member $discordUserId for role sync: ${throwable.message}")
+                future.complete(null)
+            }
+        )
+        return future
+    }
+
+    private fun applyRoleChanges(
+        guild: Guild,
+        discordUserId: String,
+        rolesToAdd: List<Role>,
+        rolesToRemove: List<Role>,
+        future: CompletableFuture<Void>,
+    ) {
+        val member = UserSnowflake.fromId(discordUserId)
+        val tasks = mutableListOf<CompletableFuture<Unit>>()
+
+        rolesToAdd.forEach { role ->
+            val task = CompletableFuture<Unit>()
+            guild.addRoleToMember(member, role).queue({ task.complete(Unit) }, { task.completeExceptionally(it) })
+            tasks += task
+        }
+        rolesToRemove.forEach { role ->
+            val task = CompletableFuture<Unit>()
+            guild.removeRoleFromMember(member, role).queue({ task.complete(Unit) }, { task.completeExceptionally(it) })
+            tasks += task
+        }
+
+        CompletableFuture.allOf(*tasks.toTypedArray()).whenComplete { _, throwable ->
+            if (throwable != null) {
+                logger.warning("Failed to apply Discord roles for $discordUserId: ${throwable.message}")
+            }
+            future.complete(null)
+        }
+    }
+
+    private fun guild(): Guild? {
+        val currentJda = jda ?: return null
+        return currentJda.getGuildById(config.guildId)
+    }
+}
+
+private class RoleChangeListener(
+    private val guildId: String,
+    private val roleUpdateHandler: (discordUserId: String) -> Unit,
+) : ListenerAdapter() {
+    override fun onGuildMemberRoleAdd(event: GuildMemberRoleAddEvent) {
+        if (event.guild.id == guildId) {
+            roleUpdateHandler(event.user.id)
+        }
+    }
+
+    override fun onGuildMemberRoleRemove(event: GuildMemberRoleRemoveEvent) {
+        if (event.guild.id == guildId) {
+            roleUpdateHandler(event.user.id)
+        }
+    }
+}

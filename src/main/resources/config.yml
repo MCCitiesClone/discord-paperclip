@@ -1,0 +1,34 @@
+# Discord bot token. The bot needs Manage Roles, View Server, and Guild Members intent enabled.
+discord-token: "replace-me"
+
+# Discord server ID to sync against.
+guild-id: "000000000000000000"
+
+sync:
+  # Periodic full reconciliation interval in seconds. Set to 0 to disable periodic sync.
+  interval-seconds: 300
+  # When true, Discord role changes are reflected into LuckPerms groups.
+  discord-to-minecraft: true
+  # When true, LuckPerms group changes are reflected into Discord roles.
+  minecraft-to-discord: true
+  # When true, groups/roles absent from the map are ignored instead of removed.
+  ignore-unmapped: true
+
+editor:
+  # Hosted web application base URL. The plugin only makes outbound HTTP/WebSocket requests.
+  base-url: "https://paperclip-editor.example.com"
+  # bytebin-compatible payload service.
+  bytebin-url: "https://bytebin.example.com"
+  # bytesocks-compatible WebSocket service. The channel ID is appended to this URL.
+  bytesocks-url: "wss://bytesocks.example.com"
+  session-ttl-seconds: 900
+  # SHA-256 fingerprints of trusted editor/browser public keys.
+  trusted-editor-keys: []
+
+# Link Minecraft users to Discord users. Keys are player UUIDs, values are Discord user IDs.
+# Populate this from your own account-linking process or edit it with the hosted editor.
+linked-accounts: {}
+
+# Map LuckPerms group names to Discord role IDs.
+group-role-map:
+  default: "000000000000000000"
