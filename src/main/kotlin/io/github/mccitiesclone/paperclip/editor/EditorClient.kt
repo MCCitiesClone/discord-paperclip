@@ -2,6 +2,7 @@ package io.github.mccitiesclone.paperclip.editor
 
 import io.github.mccitiesclone.paperclip.PaperclipConfig
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -39,6 +40,7 @@ class EditorClient(
     private val config: PaperclipConfig,
     dataFolder: Path,
     private val logger: Logger,
+    private val availableGroupNames: () -> Set<String>,
 ) {
     private val client = editorHttpClient(config.editor, dataFolder, logger)
     private val bytebin = BytebinClient(client, config.editor.bytebinUrl)
@@ -228,8 +230,17 @@ class EditorClient(
             put("expiresAt", JsonPrimitive(Instant.now().plusSeconds(config.editor.sessionTtlSeconds).epochSecond))
             put("channelId", JsonPrimitive(channelId))
             put("serverPublicKey", JsonPrimitive(encodeKey(publicKey)))
+            put("availableGroups", availableGroupsJson())
             put("config", editableConfigJson())
         }
+
+    private fun availableGroupsJson(): JsonArray =
+        JsonArray(
+            (availableGroupNames() + config.groupRoleMap.keys)
+                .filter { it.isNotBlank() }
+                .sorted()
+                .map { JsonPrimitive(it) }
+        )
 
     private fun editableConfigJson(): JsonObject =
         buildJsonObject {

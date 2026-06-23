@@ -56,6 +56,7 @@ export default function Home() {
   const [payload, setPayload] = useState<SessionPayload | null>(null);
   const [groupRows, setGroupRows] = useState<Row[]>([]);
   const [accountRows, setAccountRows] = useState<Row[]>([]);
+  const [availableGroups, setAvailableGroups] = useState<string[]>([]);
   const [nonce, setNonce] = useState("");
   const [lastApplied, setLastApplied] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
@@ -119,6 +120,7 @@ export default function Home() {
       setPayload(loaded);
       setGroupRows(mapToRows(loaded.config.groupRoleMap));
       setAccountRows(mapToRows(loaded.config.linkedAccounts));
+      setAvailableGroups(uniqueSorted([...(loaded.availableGroups ?? []), ...Object.keys(loaded.config.groupRoleMap)]));
 
       const keys = await generateEditorKeys();
       privateKeyRef.current = keys.privateKey;
@@ -247,6 +249,7 @@ export default function Home() {
             leftLabel="LuckPerms group"
             rightLabel="Discord role ID"
             rows={groupRows}
+            leftOptions={availableGroups}
             onChange={setGroupRows}
           />
           <EditorTable
@@ -344,12 +347,14 @@ function EditorTable({
   leftLabel,
   rightLabel,
   rows,
+  leftOptions,
   onChange,
 }: {
   title: string;
   leftLabel: string;
   rightLabel: string;
   rows: Row[];
+  leftOptions?: string[];
   onChange: (rows: Row[]) => void;
 }) {
   const updateRow = (id: string, patch: Partial<Row>) => {
@@ -380,7 +385,15 @@ function EditorTable({
         ) : (
           rows.map((row) => (
             <div key={row.id} className="grid min-w-[620px] grid-cols-[1fr_1fr_48px] gap-3 border-b px-4 py-3 last:border-b-0">
-              <Input value={row.left} onChange={(event) => updateRow(row.id, { left: event.target.value })} />
+              {leftOptions ? (
+                <GroupSelect
+                  value={row.left}
+                  options={leftOptions}
+                  onChange={(value) => updateRow(row.id, { left: value })}
+                />
+              ) : (
+                <Input value={row.left} onChange={(event) => updateRow(row.id, { left: event.target.value })} />
+              )}
               <Input value={row.right} onChange={(event) => updateRow(row.id, { right: event.target.value })} />
               <Button
                 variant="ghost"
@@ -395,6 +408,35 @@ function EditorTable({
         )}
       </div>
     </div>
+  );
+}
+
+function GroupSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  const selectOptions = uniqueSorted(value ? [value, ...options] : options);
+
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <option value="" disabled>
+        Select a group
+      </option>
+      {selectOptions.map((group) => (
+        <option key={group} value={group}>
+          {group}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -415,4 +457,10 @@ function rowsToMap(rows: Row[]) {
     }
     return next;
   }, {});
+}
+
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((first, second) =>
+    first.localeCompare(second),
+  );
 }

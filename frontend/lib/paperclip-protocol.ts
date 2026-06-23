@@ -9,6 +9,7 @@ export type SessionPayload = {
   expiresAt: number;
   channelId: string;
   serverPublicKey: string;
+  availableGroups?: string[];
   config: EditableConfig;
 };
 

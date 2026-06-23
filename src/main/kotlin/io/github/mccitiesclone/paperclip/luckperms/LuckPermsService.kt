@@ -12,6 +12,9 @@ import java.util.logging.Logger
 class LuckPermsService(private val logger: Logger) {
     private val luckPerms = LuckPermsProvider.get()
 
+    fun availableGroupNames(): Set<String> =
+        luckPerms.groupManager.loadedGroups.map { it.name }.toSet()
+
     fun loadGroups(uuid: UUID): CompletableFuture<Set<String>> =
         luckPerms.userManager.loadUser(uuid).thenApply { user ->
             user.getNodes(NodeType.INHERITANCE).map { it.groupName }.toSet()
