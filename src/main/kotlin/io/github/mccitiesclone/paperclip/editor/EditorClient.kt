@@ -10,7 +10,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
 import java.net.http.HttpClient
+import java.net.http.HttpHeaders
 import java.net.http.WebSocket
+import java.net.http.WebSocketHandshakeException
 import java.nio.file.Path
 import java.nio.charset.StandardCharsets
 import java.security.KeyFactory
@@ -25,7 +27,9 @@ import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
+import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
 import java.util.logging.Logger
 
 class EditorClient(
@@ -96,12 +100,47 @@ class EditorClient(
     private fun connectSocket(session: ActiveEditorSession): CompletableFuture<WebSocket> {
         val uri = URI.create("${config.editor.bytesocksUrl.trimEnd('/')}/${session.channelId}")
         return client.newWebSocketBuilder()
+            .header("User-Agent", "DiscordPaperclip/editor")
+            .header("Origin", config.editor.baseUrl)
             .buildAsync(uri, SocketListener(session))
             .thenApply { socket ->
                 session.socket = socket
                 socket
             }
+            .exceptionally { throwable ->
+                throw describeSocketFailure(uri, throwable)
+            }
     }
+
+    private fun describeSocketFailure(uri: URI, throwable: Throwable): IllegalStateException {
+        val cause = unwrapCompletion(throwable)
+        if (cause is WebSocketHandshakeException) {
+            val response = cause.response
+            return IllegalStateException(
+                "bytesocks WebSocket handshake failed for $uri: HTTP ${response.statusCode()}${headerSummary(response.headers())}. " +
+                    "Check editor.bytesocks-url points at a WebSocket relay, not the hosted editor web app or bytebin URL.",
+                cause,
+            )
+        }
+        return IllegalStateException("bytesocks WebSocket connection failed for $uri: ${cause.message ?: cause.javaClass.simpleName}", cause)
+    }
+
+    private fun headerSummary(headers: HttpHeaders): String {
+        val contentType = headers.firstValue("content-type").orElse(null)
+        val server = headers.firstValue("server").orElse(null)
+        val parts = listOfNotNull(
+            contentType?.let { "content-type=$it" },
+            server?.let { "server=$it" },
+        )
+        return if (parts.isEmpty()) "" else " (${parts.joinToString(", ")})"
+    }
+
+    private fun unwrapCompletion(throwable: Throwable): Throwable =
+        when (throwable) {
+            is CompletionException -> throwable.cause?.let(::unwrapCompletion) ?: throwable
+            is ExecutionException -> throwable.cause?.let(::unwrapCompletion) ?: throwable
+            else -> throwable
+        }
 
     private fun uploadPayload(payload: String): CompletableFuture<String> =
         bytebin.uploadJson(payload)
