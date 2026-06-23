@@ -38,6 +38,8 @@ The hosted editor follows the same broad shape as LuckPerms:
 - `editor.bytesocks-url/{channelId}` is a WebSocket relay channel shared by the plugin and browser.
 - `editor.trusted-ca-certificates` can list PEM CA certificate files for private or
   self-signed bytebin/bytesocks TLS. Relative paths are resolved from the plugin data folder.
+- `editor.allow-insecure-tls` disables certificate validation for editor bytebin/bytesocks
+  traffic only. Keep it `false` unless you need a temporary private-service escape hatch.
 
 Example private CA configuration:
 
@@ -45,6 +47,13 @@ Example private CA configuration:
 editor:
   trusted-ca-certificates:
     - private-bytebin-ca.pem
+```
+
+Temporary insecure private editor configuration:
+
+```yaml
+editor:
+  allow-insecure-tls: true
 ```
 
 For compatibility with simple bytebin clones, uploads also accept JSON response bodies with

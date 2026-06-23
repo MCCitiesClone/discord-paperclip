@@ -6,10 +6,12 @@ import java.net.http.HttpClient
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.KeyStore
+import java.security.SecureRandom
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.time.Duration
 import java.util.logging.Logger
+import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
@@ -25,11 +27,21 @@ internal fun editorHttpClient(
     val builder = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(15))
 
-    if (settings.trustedCaCertificates.isNotEmpty()) {
+    if (settings.allowInsecureTls) {
+        logger.warning("Editor TLS certificate validation is disabled by editor.allow-insecure-tls. Use only for private development or temporary recovery.")
+        builder.sslContext(insecureSslContext())
+        builder.sslParameters(SSLParameters().apply { endpointIdentificationAlgorithm = "" })
+    } else if (settings.trustedCaCertificates.isNotEmpty()) {
         builder.sslContext(editorSslContext(settings.trustedCaCertificates, dataFolder, logger))
     }
 
     return builder.build()
+}
+
+private fun insecureSslContext(): SSLContext {
+    val sslContext = SSLContext.getInstance("TLS")
+    sslContext.init(null, arrayOf(InsecureTrustManager), SecureRandom())
+    return sslContext
 }
 
 private fun editorSslContext(
@@ -41,6 +53,22 @@ private fun editorSslContext(
     val sslContext = SSLContext.getInstance("TLS")
     sslContext.init(null, arrayOf(CompositeTrustManager(defaultTrustManager(), customTrustManager)), null)
     return sslContext
+}
+
+private object InsecureTrustManager : X509ExtendedTrustManager() {
+    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+
+    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+
+    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, socket: Socket) = Unit
+
+    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, socket: Socket) = Unit
+
+    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, engine: SSLEngine) = Unit
+
+    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, engine: SSLEngine) = Unit
+
+    override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 }
 
 private fun customTrustManager(

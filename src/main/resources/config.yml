@@ -25,6 +25,9 @@ editor:
   # Optional PEM CA certificates for private/self-signed bytebin or bytesocks TLS.
   # Relative paths are resolved from the plugin data folder.
   trusted-ca-certificates: []
+  # Temporary escape hatch for private editor services with invalid TLS.
+  # This disables certificate validation only for editor bytebin/bytesocks traffic.
+  allow-insecure-tls: false
   # SHA-256 fingerprints of trusted editor/browser public keys.
   trusted-editor-keys: []
 
