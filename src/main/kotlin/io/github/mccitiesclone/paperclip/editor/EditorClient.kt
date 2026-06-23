@@ -1,5 +1,6 @@
 package io.github.mccitiesclone.paperclip.editor
 
+import io.github.mccitiesclone.paperclip.ConfigFolder
 import io.github.mccitiesclone.paperclip.PaperclipConfig
 import io.github.mccitiesclone.paperclip.discord.DesiredDiscordRole
 import io.github.mccitiesclone.paperclip.discord.DiscordRole
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -256,8 +258,20 @@ class EditorClient(
             put("availableGroups", availableGroupsJson())
             put("groups", groupsJson())
             put("availableDiscordRoles", availableDiscordRolesJson())
+            put("groupFolders", foldersJson(config.groupFolders))
+            put("roleFolders", foldersJson(config.roleFolders))
             put("config", editableConfigJson())
         }
+
+    private fun foldersJson(folders: List<ConfigFolder>): JsonArray =
+        JsonArray(
+            folders.map { folder ->
+                buildJsonObject {
+                    put("name", JsonPrimitive(folder.name))
+                    put("members", JsonArray(folder.members.map { JsonPrimitive(it) }))
+                }
+            }
+        )
 
     private fun availableGroupsJson(): JsonArray =
         JsonArray(
@@ -349,8 +363,30 @@ class EditorClient(
             }
             ?: emptyList()
 
-        return EditorResult(groupRoleMap, roleGroupMap, linkedAccounts, managedGroups, managedDiscordRoles)
+        return EditorResult(
+            groupRoleMap,
+            roleGroupMap,
+            linkedAccounts,
+            managedGroups,
+            managedDiscordRoles,
+            parseFolders(root["groupFolders"]),
+            parseFolders(root["roleFolders"]),
+        )
     }
+
+    private fun parseFolders(element: JsonElement?): List<ConfigFolder> =
+        element?.jsonArray?.mapNotNull { entry ->
+            val obj = entry.jsonObject
+            val name = obj["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            if (name.isBlank()) {
+                null
+            } else {
+                val members = obj["members"]?.jsonArray
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.ifBlank { null } }
+                    ?: emptyList()
+                ConfigFolder(name, members)
+            }
+        } ?: emptyList()
 
     private inner class SocketListener(
         private val session: ActiveEditorSession,
@@ -525,6 +561,8 @@ class EditorClient(
             put("availableGroups", availableGroupsJson())
             put("groups", groupsJson())
             put("availableDiscordRoles", availableDiscordRolesJson())
+            put("groupFolders", foldersJson(result.groupFolders))
+            put("roleFolders", foldersJson(result.roleFolders))
         }
 }
 
@@ -540,6 +578,8 @@ data class EditorResult(
     val linkedAccounts: Map<String, String>,
     val managedGroups: List<DesiredGroup> = emptyList(),
     val managedDiscordRoles: List<DesiredDiscordRole> = emptyList(),
+    val groupFolders: List<ConfigFolder> = emptyList(),
+    val roleFolders: List<ConfigFolder> = emptyList(),
 )
 
 private fun sign(message: String, privateKey: PrivateKey): String {

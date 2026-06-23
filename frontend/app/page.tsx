@@ -5,9 +5,12 @@ import {
   AlertCircle,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Circle,
   Copy,
+  Folder as FolderIcon,
+  FolderPlus,
   Palette,
   Plus,
   RefreshCw,
@@ -29,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  ConfigFolder,
   DiscordRole,
   EditableConfig,
   GroupInfo,
@@ -65,11 +69,18 @@ type Row = {
   right: string;
 };
 
+type Folder = {
+  id: string;
+  name: string;
+  collapsed: boolean;
+};
+
 type GroupItem = {
   id: string;
   name: string;
   displayName: string;
   existing: boolean;
+  folderId: string | null;
 };
 
 type RoleItem = {
@@ -78,6 +89,7 @@ type RoleItem = {
   name: string;
   color: number;
   existing: boolean;
+  folderId: string | null;
 };
 
 const bytebinUrl = process.env.NEXT_PUBLIC_BYTEBIN_URL ?? "";
@@ -94,7 +106,9 @@ export default function Home() {
   const [roleRows, setRoleRows] = useState<Row[]>([]);
   const [accountRows, setAccountRows] = useState<Row[]>([]);
   const [lpGroups, setLpGroups] = useState<GroupItem[]>([]);
+  const [lpFolders, setLpFolders] = useState<Folder[]>([]);
   const [discordRoleItems, setDiscordRoleItems] = useState<RoleItem[]>([]);
+  const [roleFolders, setRoleFolders] = useState<Folder[]>([]);
   const [availableGroups, setAvailableGroups] = useState<string[]>([]);
   const [availableRoles, setAvailableRoles] = useState<DiscordRole[]>([]);
   const [nonce, setNonce] = useState("");
@@ -145,18 +159,20 @@ export default function Home() {
   const requestBody = useMemo(
     () => ({
       config,
-      groups: lpGroups
+      groups: reflow(lpGroups, lpFolders)
         .filter((group) => group.name.trim())
         .map((group) => ({ name: group.name.trim(), displayName: group.displayName.trim() })),
-      discordRoles: discordRoleItems
+      discordRoles: reflow(discordRoleItems, roleFolders)
         .filter((role) => role.name.trim())
         .map((role) => ({
           id: role.roleId.trim() || null,
           name: role.name.trim(),
           color: role.color,
         })),
+      groupFolders: foldersToConfig(lpFolders, lpGroups, (group) => group.name.trim()),
+      roleFolders: foldersToConfig(roleFolders, discordRoleItems, (role) => role.roleId.trim()),
     }),
-    [config, lpGroups, discordRoleItems],
+    [config, lpGroups, lpFolders, discordRoleItems, roleFolders],
   );
 
   const loadSessionData = useCallback(
@@ -165,6 +181,8 @@ export default function Home() {
       availableGroups?: string[];
       groups?: GroupInfo[];
       availableDiscordRoles?: DiscordRole[];
+      groupFolders?: ConfigFolder[];
+      roleFolders?: ConfigFolder[];
     }) => {
       setGroupRows(mapToRows(data.config.groupRoleMap ?? {}));
       setRoleRows(mapToRows(data.config.roleGroupMap ?? {}));
@@ -184,8 +202,34 @@ export default function Home() {
           ...unknownRoleIds(Object.keys(data.config.roleGroupMap ?? {})),
         ]),
       );
-      setLpGroups(groupInfosToItems(data.groups ?? []));
-      setDiscordRoleItems(rolesToItems(data.availableDiscordRoles ?? []));
+      const groupFolders = configToFolders(data.groupFolders ?? []);
+      const discordRoleFolders = configToFolders(data.roleFolders ?? []);
+      setLpFolders(groupFolders);
+      setRoleFolders(discordRoleFolders);
+      setLpGroups(
+        reflow(
+          assignFolders(
+            groupInfosToItems(data.groups ?? []),
+            data.groupFolders ?? [],
+            groupFolders,
+            (group) => group.name,
+            (group, folderId) => ({ ...group, folderId }),
+          ),
+          groupFolders,
+        ),
+      );
+      setDiscordRoleItems(
+        reflow(
+          assignFolders(
+            rolesToItems(data.availableDiscordRoles ?? []),
+            data.roleFolders ?? [],
+            discordRoleFolders,
+            (role) => role.roleId,
+            (role, folderId) => ({ ...role, folderId }),
+          ),
+          discordRoleFolders,
+        ),
+      );
     },
     [],
   );
@@ -386,8 +430,18 @@ export default function Home() {
               />
             </TabsContent>
             <TabsContent value="roles" className="mt-0 grid gap-4">
-              <GroupManager groups={lpGroups} onChange={setLpGroups} />
-              <DiscordRoleManager roles={discordRoleItems} onChange={setDiscordRoleItems} />
+              <GroupManager
+                groups={lpGroups}
+                folders={lpFolders}
+                onGroupsChange={setLpGroups}
+                onFoldersChange={setLpFolders}
+              />
+              <DiscordRoleManager
+                roles={discordRoleItems}
+                folders={roleFolders}
+                onRolesChange={setDiscordRoleItems}
+                onFoldersChange={setRoleFolders}
+              />
             </TabsContent>
           </div>
 
@@ -483,161 +537,351 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 function GroupManager({
   groups,
-  onChange,
+  folders,
+  onGroupsChange,
+  onFoldersChange,
 }: {
   groups: GroupItem[];
-  onChange: (groups: GroupItem[]) => void;
+  folders: Folder[];
+  onGroupsChange: (groups: GroupItem[]) => void;
+  onFoldersChange: (folders: Folder[]) => void;
 }) {
-  const updateGroup = (id: string, patch: Partial<GroupItem>) => {
-    onChange(groups.map((group) => (group.id === id ? { ...group, ...patch } : group)));
+  return (
+    <FolderedList
+      title="LuckPerms Groups"
+      description="Top of the list = highest weight. Folders are for organization only. New groups are created on apply."
+      columnTemplate="1fr 1fr"
+      headerCells={
+        <>
+          <div>Group name</div>
+          <div>Display name</div>
+        </>
+      }
+      emptyLabel="No groups."
+      addToTop={false}
+      items={groups}
+      folders={folders}
+      onItemsChange={onGroupsChange}
+      onFoldersChange={onFoldersChange}
+      makeItem={(folderId) => ({
+        id: crypto.randomUUID(),
+        name: "",
+        displayName: "",
+        existing: false,
+        folderId,
+      })}
+      renderCells={(group, update) => (
+        <>
+          <Input
+            value={group.name}
+            placeholder="group-name"
+            disabled={group.existing}
+            onChange={(event) => update({ name: event.target.value })}
+          />
+          <Input
+            value={group.displayName}
+            placeholder="Optional display name"
+            onChange={(event) => update({ displayName: event.target.value })}
+          />
+        </>
+      )}
+    />
+  );
+}
+
+function DiscordRoleManager({
+  roles,
+  folders,
+  onRolesChange,
+  onFoldersChange,
+}: {
+  roles: RoleItem[];
+  folders: Folder[];
+  onRolesChange: (roles: RoleItem[]) => void;
+  onFoldersChange: (folders: Folder[]) => void;
+}) {
+  return (
+    <FolderedList
+      title="Discord Roles"
+      description="Top of the list = highest role. Folders are for organization only. New roles are created on apply."
+      columnTemplate="140px 1fr"
+      headerCells={
+        <>
+          <div>Color</div>
+          <div>Role name</div>
+        </>
+      }
+      emptyLabel="No roles."
+      addToTop
+      items={roles}
+      folders={folders}
+      onItemsChange={onRolesChange}
+      onFoldersChange={onFoldersChange}
+      makeItem={(folderId) => ({
+        id: crypto.randomUUID(),
+        roleId: "",
+        name: "",
+        color: 0,
+        existing: false,
+        folderId,
+      })}
+      renderCells={(role, update) => (
+        <>
+          <ColorField color={role.color} onChange={(color) => update({ color })} />
+          <Input
+            value={role.name}
+            placeholder="Role name"
+            onChange={(event) => update({ name: event.target.value })}
+          />
+        </>
+      )}
+    />
+  );
+}
+
+type FolderedItem = { id: string; folderId: string | null };
+
+function FolderedList<T extends FolderedItem>({
+  title,
+  description,
+  columnTemplate,
+  headerCells,
+  emptyLabel,
+  addToTop,
+  items,
+  folders,
+  onItemsChange,
+  onFoldersChange,
+  makeItem,
+  renderCells,
+}: {
+  title: string;
+  description: string;
+  columnTemplate: string;
+  headerCells: React.ReactNode;
+  emptyLabel: string;
+  addToTop: boolean;
+  items: T[];
+  folders: Folder[];
+  onItemsChange: (items: T[]) => void;
+  onFoldersChange: (folders: Folder[]) => void;
+  makeItem: (folderId: string | null) => T;
+  renderCells: (item: T, update: (patch: Partial<T>) => void) => React.ReactNode;
+}) {
+  const gridColumns = `64px ${columnTemplate} 150px 48px`;
+
+  const addItem = (folderId: string | null) => {
+    const created = makeItem(folderId);
+    const next = addToTop ? [created, ...items] : [...items, created];
+    onItemsChange(reflow(next, folders));
   };
+
+  const updateItem = (id: string, patch: Partial<T>) => {
+    onItemsChange(items.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  };
+
+  const removeItem = (id: string) => {
+    onItemsChange(items.filter((item) => item.id !== id));
+  };
+
+  const assignFolder = (id: string, folderId: string | null) => {
+    const target = items.find((item) => item.id === id);
+    if (!target) return;
+    const rest = items.filter((item) => item.id !== id);
+    onItemsChange(reflow([...rest, { ...target, folderId }], folders));
+  };
+
+  const moveItem = (id: string, direction: -1 | 1) => {
+    const index = items.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    const { folderId } = items[index];
+    let target = index + direction;
+    while (target >= 0 && target < items.length && items[target].folderId !== folderId) {
+      target += direction;
+    }
+    if (target < 0 || target >= items.length) return;
+    const next = [...items];
+    [next[index], next[target]] = [next[target], next[index]];
+    onItemsChange(next);
+  };
+
+  const addFolder = () => {
+    onFoldersChange([...folders, { id: crypto.randomUUID(), name: "New folder", collapsed: false }]);
+  };
+
+  const updateFolder = (id: string, patch: Partial<Folder>) => {
+    onFoldersChange(folders.map((folder) => (folder.id === id ? { ...folder, ...patch } : folder)));
+  };
+
+  const moveFolder = (id: string, direction: -1 | 1) => {
+    const index = folders.findIndex((folder) => folder.id === id);
+    const target = index + direction;
+    if (target < 0 || target >= folders.length) return;
+    const nextFolders = move(folders, index, direction);
+    onFoldersChange(nextFolders);
+    onItemsChange(reflow(items, nextFolders));
+  };
+
+  const removeFolder = (id: string) => {
+    const nextFolders = folders.filter((folder) => folder.id !== id);
+    const nextItems = items.map((item) => (item.folderId === id ? { ...item, folderId: null } : item));
+    onFoldersChange(nextFolders);
+    onItemsChange(reflow(nextItems, nextFolders));
+  };
+
+  const renderRows = (subset: T[]) =>
+    subset.map((item, index) => (
+      <div
+        key={item.id}
+        className="grid min-w-[680px] items-center gap-3 border-b px-4 py-3 last:border-b-0"
+        style={{ gridTemplateColumns: gridColumns }}
+      >
+        <OrderButtons
+          index={index}
+          count={subset.length}
+          onMove={(direction) => moveItem(item.id, direction)}
+        />
+        {renderCells(item, (patch) => updateItem(item.id, patch))}
+        <FolderSelect
+          value={item.folderId}
+          folders={folders}
+          onChange={(folderId) => assignFolder(item.id, folderId)}
+        />
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Remove"
+          onClick={() => removeItem(item.id)}
+        >
+          <Trash2 />
+        </Button>
+      </div>
+    ));
+
+  const ungrouped = items.filter(
+    (item) => item.folderId === null || !folders.some((folder) => folder.id === item.folderId),
+  );
 
   return (
     <Card className="overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b p-4">
         <div className="space-y-1">
-          <CardTitle className="text-base">LuckPerms Groups</CardTitle>
-          <CardDescription className="text-xs">
-            Top of the list = highest weight. New groups are created on apply.
-          </CardDescription>
+          <CardTitle className="text-base">{title}</CardTitle>
+          <CardDescription className="text-xs">{description}</CardDescription>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            onChange([
-              ...groups,
-              { id: crypto.randomUUID(), name: "", displayName: "", existing: false },
-            ])
-          }
-        >
-          <Plus />
-          Add
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={addFolder}>
+            <FolderPlus />
+            Folder
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => addItem(null)}>
+            <Plus />
+            Add
+          </Button>
+        </div>
       </CardHeader>
       <div className="overflow-x-auto">
-        <div className="grid min-w-[620px] grid-cols-[64px_1fr_1fr_48px] border-b bg-muted px-4 py-2 text-xs font-medium uppercase text-muted-foreground">
+        <div
+          className="grid min-w-[680px] border-b bg-muted px-4 py-2 text-xs font-medium uppercase text-muted-foreground"
+          style={{ gridTemplateColumns: gridColumns }}
+        >
           <div>Order</div>
-          <div>Group name</div>
-          <div>Display name</div>
+          {headerCells}
+          <div>Folder</div>
           <div />
         </div>
-        {groups.length === 0 ? (
-          <div className="px-4 py-8 text-sm text-muted-foreground">No groups.</div>
+        {items.length === 0 && folders.length === 0 ? (
+          <div className="px-4 py-8 text-sm text-muted-foreground">{emptyLabel}</div>
         ) : (
-          groups.map((group, index) => (
-            <div
-              key={group.id}
-              className="grid min-w-[620px] grid-cols-[64px_1fr_1fr_48px] items-center gap-3 border-b px-4 py-3 last:border-b-0"
-            >
-              <OrderButtons
-                index={index}
-                count={groups.length}
-                onMove={(direction) => onChange(move(groups, index, direction))}
-              />
-              <Input
-                value={group.name}
-                placeholder="group-name"
-                disabled={group.existing}
-                onChange={(event) => updateGroup(group.id, { name: event.target.value })}
-              />
-              <Input
-                value={group.displayName}
-                placeholder="Optional display name"
-                onChange={(event) => updateGroup(group.id, { displayName: event.target.value })}
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Stop managing group"
-                onClick={() => onChange(groups.filter((candidate) => candidate.id !== group.id))}
-              >
-                <Trash2 />
-              </Button>
-            </div>
-          ))
+          <>
+            {renderRows(ungrouped)}
+            {folders.map((folder, index) => {
+              const folderItems = items.filter((item) => item.folderId === folder.id);
+              return (
+                <div key={folder.id}>
+                  <div className="flex min-w-[680px] items-center gap-2 border-b bg-muted/50 px-4 py-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      aria-label={folder.collapsed ? "Expand folder" : "Collapse folder"}
+                      onClick={() => updateFolder(folder.id, { collapsed: !folder.collapsed })}
+                    >
+                      {folder.collapsed ? <ChevronRight /> : <ChevronDown />}
+                    </Button>
+                    <FolderIcon className="size-4 text-muted-foreground" />
+                    <Input
+                      value={folder.name}
+                      placeholder="Folder name"
+                      className="h-8 max-w-xs"
+                      onChange={(event) => updateFolder(folder.id, { name: event.target.value })}
+                    />
+                    <span className="text-xs text-muted-foreground">{folderItems.length}</span>
+                    <div className="ml-auto flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        aria-label="Add to folder"
+                        onClick={() => addItem(folder.id)}
+                      >
+                        <Plus />
+                      </Button>
+                      <OrderButtons
+                        index={index}
+                        count={folders.length}
+                        onMove={(direction) => moveFolder(folder.id, direction)}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        aria-label="Delete folder"
+                        onClick={() => removeFolder(folder.id)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </div>
+                  {folder.collapsed ? null : folderItems.length === 0 ? (
+                    <div className="min-w-[680px] px-4 py-4 pl-12 text-sm text-muted-foreground">
+                      Empty folder.
+                    </div>
+                  ) : (
+                    renderRows(folderItems)
+                  )}
+                </div>
+              );
+            })}
+          </>
         )}
       </div>
     </Card>
   );
 }
 
-function DiscordRoleManager({
-  roles,
+function FolderSelect({
+  value,
+  folders,
   onChange,
 }: {
-  roles: RoleItem[];
-  onChange: (roles: RoleItem[]) => void;
+  value: string | null;
+  folders: Folder[];
+  onChange: (value: string | null) => void;
 }) {
-  const updateRole = (id: string, patch: Partial<RoleItem>) => {
-    onChange(roles.map((role) => (role.id === id ? { ...role, ...patch } : role)));
-  };
-
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b p-4">
-        <div className="space-y-1">
-          <CardTitle className="text-base">Discord Roles</CardTitle>
-          <CardDescription className="text-xs">
-            Top of the list = highest role. New roles are created on apply.
-          </CardDescription>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            onChange([
-              { id: crypto.randomUUID(), roleId: "", name: "", color: 0, existing: false },
-              ...roles,
-            ])
-          }
-        >
-          <Plus />
-          Add
-        </Button>
-      </CardHeader>
-      <div className="overflow-x-auto">
-        <div className="grid min-w-[620px] grid-cols-[64px_140px_1fr_48px] border-b bg-muted px-4 py-2 text-xs font-medium uppercase text-muted-foreground">
-          <div>Order</div>
-          <div>Color</div>
-          <div>Role name</div>
-          <div />
-        </div>
-        {roles.length === 0 ? (
-          <div className="px-4 py-8 text-sm text-muted-foreground">No roles.</div>
-        ) : (
-          roles.map((role, index) => (
-            <div
-              key={role.id}
-              className="grid min-w-[620px] grid-cols-[64px_140px_1fr_48px] items-center gap-3 border-b px-4 py-3 last:border-b-0"
-            >
-              <OrderButtons
-                index={index}
-                count={roles.length}
-                onMove={(direction) => onChange(move(roles, index, direction))}
-              />
-              <ColorField
-                color={role.color}
-                onChange={(color) => updateRole(role.id, { color })}
-              />
-              <Input
-                value={role.name}
-                placeholder="Role name"
-                onChange={(event) => updateRole(role.id, { name: event.target.value })}
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Stop managing role"
-                onClick={() => onChange(roles.filter((candidate) => candidate.id !== role.id))}
-              >
-                <Trash2 />
-              </Button>
-            </div>
-          ))
-        )}
-      </div>
-    </Card>
+    <select
+      value={value ?? ""}
+      onChange={(event) => onChange(event.target.value || null)}
+      className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <option value="">No folder</option>
+      {folders.map((folder) => (
+        <option key={folder.id} value={folder.id}>
+          {folder.name.trim() || "Untitled"}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -900,6 +1144,7 @@ function groupInfosToItems(groups: GroupInfo[]): GroupItem[] {
     name: group.name,
     displayName: group.displayName ?? "",
     existing: true,
+    folderId: null,
   }));
 }
 
@@ -915,7 +1160,69 @@ function rolesToItems(roles: DiscordRole[]): RoleItem[] {
       name: role.name,
       color: role.color ?? 0,
       existing: true,
+      folderId: null,
     }));
+}
+
+function reflow<T extends FolderedItem>(items: T[], folders: Folder[]): T[] {
+  const known = new Set(folders.map((folder) => folder.id));
+  const result = items.filter((item) => item.folderId === null || !known.has(item.folderId));
+  folders.forEach((folder) => {
+    result.push(...items.filter((item) => item.folderId === folder.id));
+  });
+  return result;
+}
+
+function configToFolders(folders: ConfigFolder[]): Folder[] {
+  return folders.map((folder) => ({
+    id: crypto.randomUUID(),
+    name: folder.name,
+    collapsed: false,
+  }));
+}
+
+function foldersToConfig<T extends FolderedItem>(
+  folders: Folder[],
+  items: T[],
+  keyOf: (item: T) => string,
+): ConfigFolder[] {
+  return folders
+    .filter((folder) => folder.name.trim())
+    .map((folder) => ({
+      name: folder.name.trim(),
+      members: items
+        .filter((item) => item.folderId === folder.id)
+        .map(keyOf)
+        .filter(Boolean),
+    }));
+}
+
+function assignFolders<T>(
+  items: T[],
+  configFolders: ConfigFolder[],
+  folders: Folder[],
+  keyOf: (item: T) => string,
+  withFolder: (item: T, folderId: string | null) => T,
+): T[] {
+  const folderByKey = new Map<string, string>();
+  const rankByKey = new Map<string, number>();
+  let rank = 0;
+  configFolders.forEach((configFolder, index) => {
+    const folderId = folders[index]?.id;
+    if (!folderId) return;
+    configFolder.members.forEach((member) => {
+      folderByKey.set(member, folderId);
+      rankByKey.set(member, rank);
+      rank += 1;
+    });
+  });
+  return items
+    .map((item) => withFolder(item, folderByKey.get(keyOf(item)) ?? null))
+    .sort((first, second) => {
+      const firstRank = rankByKey.get(keyOf(first)) ?? Number.MAX_SAFE_INTEGER;
+      const secondRank = rankByKey.get(keyOf(second)) ?? Number.MAX_SAFE_INTEGER;
+      return firstRank - secondRank;
+    });
 }
 
 function move<T>(list: T[], index: number, direction: -1 | 1): T[] {

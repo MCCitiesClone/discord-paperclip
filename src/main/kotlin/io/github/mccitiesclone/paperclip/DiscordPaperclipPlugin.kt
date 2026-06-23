@@ -72,6 +72,9 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         config.set("linked-accounts", null)
         result.linkedAccounts.forEach { (uuid, discordId) -> config.set("linked-accounts.$uuid", discordId) }
 
+        config.set("group-folders", foldersToConfig(result.groupFolders))
+        config.set("role-folders", foldersToConfig(result.roleFolders))
+
         saveConfig()
         reloadConfig()
         return result
@@ -92,6 +95,11 @@ class DiscordPaperclipPlugin : JavaPlugin() {
                 .onFailure { logger.warning("LuckPerms group management failed: ${it.message}") }
         }
     }
+
+    private fun foldersToConfig(folders: List<ConfigFolder>): List<Map<String, Any>> =
+        folders
+            .filter { it.name.isNotBlank() }
+            .map { mapOf("name" to it.name, "members" to it.members) }
 
     fun completeAccountLink(minecraftUuid: UUID, discordUserId: String) {
         if (server.isPrimaryThread) {

@@ -43,3 +43,10 @@ group-role-map:
 # Map Discord role IDs to LuckPerms group names.
 # These entries sync Discord roles to Minecraft groups.
 role-group-map: {}
+
+# Visual folders for organizing the editor's role-management page. Purely organizational:
+# they group items in the web UI and are never applied to Discord or LuckPerms.
+# Each entry has a name and an ordered list of members. Edit these with the hosted editor.
+# group-folders members are LuckPerms group names; role-folders members are Discord role IDs.
+group-folders: []
+role-folders: []

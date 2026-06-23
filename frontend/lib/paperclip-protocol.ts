@@ -13,6 +13,8 @@ export type SessionPayload = {
   availableGroups?: string[];
   groups?: GroupInfo[];
   availableDiscordRoles?: DiscordRole[];
+  groupFolders?: ConfigFolder[];
+  roleFolders?: ConfigFolder[];
   config: EditableConfig;
 };
 
@@ -25,6 +27,14 @@ export type RefreshedPayload = {
   availableGroups?: string[];
   groups?: GroupInfo[];
   availableDiscordRoles?: DiscordRole[];
+  groupFolders?: ConfigFolder[];
+  roleFolders?: ConfigFolder[];
+};
+
+/** A visual folder of LuckPerms groups or Discord roles. Members are ordered group names / role IDs. */
+export type ConfigFolder = {
+  name: string;
+  members: string[];
 };
 
 export type DiscordRole = {

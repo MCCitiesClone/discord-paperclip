@@ -11,6 +11,8 @@ data class PaperclipConfig(
     val linkedAccounts: Map<UUID, String>,
     val groupRoleMap: Map<String, String>,
     val roleGroupMap: Map<String, String>,
+    val groupFolders: List<ConfigFolder>,
+    val roleFolders: List<ConfigFolder>,
 ) {
     companion object {
         fun from(config: FileConfiguration): PaperclipConfig {
@@ -38,6 +40,8 @@ data class PaperclipConfig(
                 ?: emptyMap()
 
             return PaperclipConfig(
+                groupFolders = parseFolders(config, "group-folders"),
+                roleFolders = parseFolders(config, "role-folders"),
                 discordToken = config.getString("discord-token").orEmpty(),
                 guildId = config.getString("guild-id").orEmpty(),
                 sync = SyncSettings(
@@ -61,6 +65,16 @@ data class PaperclipConfig(
             )
         }
 
+        private fun parseFolders(config: FileConfiguration, path: String): List<ConfigFolder> =
+            config.getMapList(path).mapNotNull { raw ->
+                val name = (raw["name"] as? String)?.trim().orEmpty()
+                if (name.isBlank()) return@mapNotNull null
+                val members = (raw["members"] as? List<*>)
+                    ?.mapNotNull { (it as? String)?.trim()?.ifBlank { null } }
+                    ?: emptyList()
+                ConfigFolder(name, members)
+            }
+
         private fun normalizeWebSocketUrl(value: String): String {
             val trimmed = value.trim().trimEnd('/')
             return when {
@@ -73,6 +87,12 @@ data class PaperclipConfig(
         }
     }
 }
+
+/** A visual folder grouping LuckPerms groups or Discord roles in the editor. Organizational only. */
+data class ConfigFolder(
+    val name: String,
+    val members: List<String>,
+)
 
 data class SyncSettings(
     val intervalSeconds: Long,
