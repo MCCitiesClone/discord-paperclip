@@ -1,0 +1,61 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow the workflow to create tags and releases.
+permissions:
+  contents: write
+
+# Never release two commits at once; let an in-flight run finish.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full tag history to compute the next version
+
+      - name: Compute next version
+        id: version
+        run: |
+          latest="$(git tag -l 'v*' --sort=-v:refname | head -n1)"
+          if [ -z "$latest" ]; then
+            version="0.1.0"
+          else
+            IFS='.' read -r major minor patch <<< "${latest#v}"
+            version="${major}.${minor}.$((patch + 1))"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Releasing v${version}"
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6"
+
+      - name: Build jar
+        run: gradle build -PreleaseVersion=${{ steps.version.outputs.version }} --no-daemon
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            build/libs/*.jar \
+            --title "v${{ steps.version.outputs.version }}" \
+            --target "${{ github.sha }}" \
+            --generate-notes

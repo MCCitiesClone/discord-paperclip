@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "io.github.mccitiesclone"
-version = "0.1.0"
+version = providers.gradleProperty("releaseVersion").getOrElse("0.1.0")
 
 java {
     sourceCompatibility = JavaVersion.VERSION_21
