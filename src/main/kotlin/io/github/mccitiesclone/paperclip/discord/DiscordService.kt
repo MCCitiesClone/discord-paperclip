@@ -53,13 +53,13 @@ class DiscordService(
     }
 
     fun rolesFor(discordUserId: String): CompletableFuture<Set<String>> {
-        val guild = guild() ?: return CompletableFuture.completedFuture(emptySet())
+        val guild = guild() ?: return CompletableFuture.failedFuture(IllegalStateException("Discord guild ${config.guildId} is unavailable."))
         val future = CompletableFuture<Set<String>>()
         guild.retrieveMemberById(discordUserId).queue(
             { member -> future.complete(member.roles.map { it.id }.toSet()) },
             { throwable ->
                 logger.warning("Failed to load Discord member $discordUserId: ${throwable.message}")
-                future.complete(emptySet())
+                future.completeExceptionally(throwable)
             }
         )
         return future
@@ -81,8 +81,8 @@ class DiscordService(
         guild.retrieveMemberById(discordUserId).queue(
             { member ->
                 val currentRoleIds = member.roles.map { it.id }.toSet()
-                val rolesToAdd = (desiredRoleIds - currentRoleIds).mapNotNull(guild::getRoleById)
-                val rolesToRemove = ((currentRoleIds intersect managedRoleIds) - desiredRoleIds).mapNotNull(guild::getRoleById)
+                val rolesToAdd = (desiredRoleIds - currentRoleIds).mapNotNull { guild.roleForSync(it) }
+                val rolesToRemove = ((currentRoleIds intersect managedRoleIds) - desiredRoleIds).mapNotNull { guild.roleForSync(it) }
                 applyRoleChanges(guild, discordUserId, rolesToAdd, rolesToRemove, future)
             },
             { throwable ->
@@ -125,6 +125,23 @@ class DiscordService(
     private fun guild(): Guild? {
         val currentJda = jda ?: return null
         return currentJda.getGuildById(config.guildId)
+    }
+
+    private fun Guild.roleForSync(roleId: String): Role? {
+        val role = getRoleById(roleId)
+        if (role == null) {
+            logger.warning("Configured Discord role $roleId is unavailable in guild $id.")
+            return null
+        }
+        if (role.isManaged || role.isPublicRole) {
+            logger.warning("Configured Discord role ${role.name} ($roleId) cannot be managed.")
+            return null
+        }
+        if (!selfMember.canInteract(role)) {
+            logger.warning("Configured Discord role ${role.name} ($roleId) is higher than or equal to the bot's top role.")
+            return null
+        }
+        return role
     }
 }
 

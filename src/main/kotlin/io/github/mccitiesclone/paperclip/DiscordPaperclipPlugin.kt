@@ -66,6 +66,9 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         config.set("group-role-map", null)
         result.groupRoleMap.forEach { (group, roleId) -> config.set("group-role-map.$group", roleId) }
 
+        config.set("role-group-map", null)
+        result.roleGroupMap.forEach { (roleId, group) -> config.set("role-group-map.$roleId", group) }
+
         config.set("linked-accounts", null)
         result.linkedAccounts.forEach { (uuid, discordId) -> config.set("linked-accounts.$uuid", discordId) }
 

@@ -10,6 +10,7 @@ data class PaperclipConfig(
     val editor: EditorSettings,
     val linkedAccounts: Map<UUID, String>,
     val groupRoleMap: Map<String, String>,
+    val roleGroupMap: Map<String, String>,
 ) {
     companion object {
         fun from(config: FileConfiguration): PaperclipConfig {
@@ -28,6 +29,12 @@ data class PaperclipConfig(
                 ?.getKeys(false)
                 ?.associateWith { group -> config.getString("group-role-map.$group").orEmpty() }
                 ?.filterValues { it.isNotBlank() && it != "000000000000000000" }
+                ?: emptyMap()
+            val roleGroupMap = config.getConfigurationSection("role-group-map")
+                ?.getKeys(false)
+                ?.associateWith { roleId -> config.getString("role-group-map.$roleId").orEmpty() }
+                ?.filterKeys { it.isNotBlank() && it != "000000000000000000" }
+                ?.filterValues { it.isNotBlank() }
                 ?: emptyMap()
 
             return PaperclipConfig(
@@ -50,6 +57,7 @@ data class PaperclipConfig(
                 ),
                 linkedAccounts = linkedAccounts,
                 groupRoleMap = groupRoleMap,
+                roleGroupMap = roleGroupMap,
             )
         }
 

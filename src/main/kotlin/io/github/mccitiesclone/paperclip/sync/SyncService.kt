@@ -25,8 +25,9 @@ class SyncService(
     private var luckPermsSubscription: EventSubscription<NodeMutateEvent>? = null
     private val linkedAccounts = ConcurrentHashMap(config.linkedAccounts)
     private val groupToRole = config.groupRoleMap
-    private val roleToGroup = groupToRole.entries.associate { (group, roleId) -> roleId to group }
+    private val roleToGroup = config.roleGroupMap
     private val managedGroups = groupToRole.keys
+    private val managedGroupsFromDiscord = roleToGroup.values.toSet()
     private val managedRoles = groupToRole.values.toSet()
 
     fun start() {
@@ -114,14 +115,12 @@ class SyncService(
     private fun syncBidirectional(minecraftUuid: UUID, discordUserId: String) {
         luckPerms.loadGroups(minecraftUuid)
             .thenCombine(discord.rolesFor(discordUserId)) { minecraftGroups, discordRoleIds ->
-                val groupsFromDiscord = discordRoleIds.mapNotNull(roleToGroup::get).toSet()
-                val rolesFromMinecraft = minecraftGroups.mapNotNull(groupToRole::get).toSet()
-                val desiredGroups = (minecraftGroups intersect managedGroups) + groupsFromDiscord
-                val desiredRoles = (discordRoleIds intersect managedRoles) + rolesFromMinecraft
+                val desiredGroups = applyDiscordRoleMapping(minecraftGroups, discordRoleIds)
+                val desiredRoles = applyMinecraftGroupMapping(minecraftGroups, discordRoleIds)
                 desiredGroups to desiredRoles
             }
             .thenCompose { (desiredGroups, desiredRoles) ->
-                val minecraftFuture = luckPerms.setGroups(minecraftUuid, desiredGroups, managedGroups)
+                val minecraftFuture = luckPerms.setGroups(minecraftUuid, desiredGroups, managedGroupsFromDiscord)
                 val discordFuture = discord.setRoles(discordUserId, desiredRoles, managedRoles)
                 java.util.concurrent.CompletableFuture.allOf(minecraftFuture, discordFuture)
             }
@@ -134,10 +133,34 @@ class SyncService(
     private fun syncDiscordToMinecraft(minecraftUuid: UUID, discordUserId: String) {
         discord.rolesFor(discordUserId).thenCompose { roleIds ->
             val desiredGroups = roleIds.mapNotNull(roleToGroup::get).toSet()
-            luckPerms.setGroups(minecraftUuid, desiredGroups, managedGroups)
+            luckPerms.setGroups(minecraftUuid, desiredGroups, managedGroupsFromDiscord)
         }.exceptionally { throwable ->
             logger.warning("Discord to Minecraft sync failed for $discordUserId: ${throwable.message}")
             null
         }
+    }
+
+    private fun applyMinecraftGroupMapping(currentGroups: Set<String>, currentRoleIds: Set<String>): Set<String> {
+        val desiredRoles = currentRoleIds.toMutableSet()
+        groupToRole.forEach { (group, roleId) ->
+            if (group in currentGroups) {
+                desiredRoles += roleId
+            } else {
+                desiredRoles -= roleId
+            }
+        }
+        return desiredRoles intersect managedRoles
+    }
+
+    private fun applyDiscordRoleMapping(currentGroups: Set<String>, currentRoleIds: Set<String>): Set<String> {
+        val desiredGroups = currentGroups.toMutableSet()
+        roleToGroup.forEach { (roleId, group) ->
+            if (roleId in currentRoleIds) {
+                desiredGroups += group
+            } else {
+                desiredGroups -= group
+            }
+        }
+        return desiredGroups intersect managedGroupsFromDiscord
     }
 }

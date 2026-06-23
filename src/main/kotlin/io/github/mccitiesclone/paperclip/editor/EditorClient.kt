@@ -244,7 +244,7 @@ class EditorClient(
 
     private fun availableGroupsJson(): JsonArray =
         JsonArray(
-            (availableGroupNames() + config.groupRoleMap.keys)
+            (availableGroupNames() + config.groupRoleMap.keys + config.roleGroupMap.values)
                 .filter { it.isNotBlank() }
                 .sorted()
                 .map { JsonPrimitive(it) }
@@ -266,6 +266,7 @@ class EditorClient(
     private fun editableConfigJson(): JsonObject =
         buildJsonObject {
             put("groupRoleMap", JsonObject(config.groupRoleMap.mapValues { JsonPrimitive(it.value) }))
+            put("roleGroupMap", JsonObject(config.roleGroupMap.mapValues { JsonPrimitive(it.value) }))
             put("linkedAccounts", JsonObject(config.linkedAccounts.mapKeys { it.key.toString() }.mapValues { JsonPrimitive(it.value) }))
         }
 
@@ -280,8 +281,13 @@ class EditorClient(
             ?.mapValues { it.value.jsonPrimitive.contentOrNull.orEmpty() }
             ?.filterValues { it.isNotBlank() }
             ?: emptyMap()
+        val roleGroupMap = configObject["roleGroupMap"]?.jsonObject
+            ?.mapValues { it.value.jsonPrimitive.contentOrNull.orEmpty() }
+            ?.filterKeys { it.isNotBlank() }
+            ?.filterValues { it.isNotBlank() }
+            ?: emptyMap()
 
-        return EditorResult(groupRoleMap, linkedAccounts)
+        return EditorResult(groupRoleMap, roleGroupMap, linkedAccounts)
     }
 
     private inner class SocketListener(
@@ -442,6 +448,7 @@ class EditorClient(
     private fun EditorResult.toJson(): JsonObject =
         buildJsonObject {
             put("groupRoleMap", JsonObject(groupRoleMap.mapValues { JsonPrimitive(it.value) }))
+            put("roleGroupMap", JsonObject(roleGroupMap.mapValues { JsonPrimitive(it.value) }))
             put("linkedAccounts", JsonObject(linkedAccounts.mapValues { JsonPrimitive(it.value) }))
         }
 }
@@ -454,6 +461,7 @@ data class EditorSession(
 
 data class EditorResult(
     val groupRoleMap: Map<String, String>,
+    val roleGroupMap: Map<String, String>,
     val linkedAccounts: Map<String, String>,
 )
 

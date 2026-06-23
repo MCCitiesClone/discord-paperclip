@@ -1,5 +1,6 @@
 export type EditableConfig = {
   groupRoleMap: Record<string, string>;
+  roleGroupMap: Record<string, string>;
   linkedAccounts: Record<string, string>;
 };
 

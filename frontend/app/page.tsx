@@ -60,6 +60,7 @@ export default function Home() {
   const [notice, setNotice] = useState("Open the editor URL from /paperclip editor.");
   const [payload, setPayload] = useState<SessionPayload | null>(null);
   const [groupRows, setGroupRows] = useState<Row[]>([]);
+  const [roleRows, setRoleRows] = useState<Row[]>([]);
   const [accountRows, setAccountRows] = useState<Row[]>([]);
   const [availableGroups, setAvailableGroups] = useState<string[]>([]);
   const [availableRoles, setAvailableRoles] = useState<DiscordRole[]>([]);
@@ -87,9 +88,10 @@ export default function Home() {
   const config = useMemo<EditableConfig>(
     () => ({
       groupRoleMap: rowsToMap(groupRows),
+      roleGroupMap: rowsToMap(roleRows),
       linkedAccounts: rowsToMap(accountRows),
     }),
-    [groupRows, accountRows],
+    [groupRows, roleRows, accountRows],
   );
 
   const sendPacket = useCallback(async (packet: Record<string, unknown>) => {
@@ -124,10 +126,19 @@ export default function Home() {
       }
 
       setPayload(loaded);
-      setGroupRows(mapToRows(loaded.config.groupRoleMap));
+      setGroupRows(mapToRows(loaded.config.groupRoleMap ?? {}));
+      setRoleRows(mapToRows(loaded.config.roleGroupMap ?? {}));
       setAccountRows(mapToRows(loaded.config.linkedAccounts));
-      setAvailableGroups(uniqueSorted([...(loaded.availableGroups ?? []), ...Object.keys(loaded.config.groupRoleMap)]));
-      setAvailableRoles(uniqueRoles([...(loaded.availableDiscordRoles ?? []), ...unknownRoles(loaded.config.groupRoleMap)]));
+      setAvailableGroups(uniqueSorted([
+        ...(loaded.availableGroups ?? []),
+        ...Object.keys(loaded.config.groupRoleMap ?? {}),
+        ...Object.values(loaded.config.roleGroupMap ?? {}),
+      ]));
+      setAvailableRoles(uniqueRoles([
+        ...(loaded.availableDiscordRoles ?? []),
+        ...unknownRoles(loaded.config.groupRoleMap ?? {}),
+        ...unknownRoleIds(Object.keys(loaded.config.roleGroupMap ?? {})),
+      ]));
 
       const keys = await loadEditorKeys();
       privateKeyRef.current = keys.privateKey;
@@ -181,6 +192,7 @@ export default function Home() {
             if (refreshedId) {
               const refreshed = await fetchPayload<EditableConfig>(bytebinUrl, refreshedId);
               setGroupRows(mapToRows(refreshed.groupRoleMap ?? {}));
+              setRoleRows(mapToRows(refreshed.roleGroupMap ?? {}));
               setAccountRows(mapToRows(refreshed.linkedAccounts ?? {}));
               setLastApplied(new Date().toLocaleTimeString());
             }
@@ -249,13 +261,22 @@ export default function Home() {
       <section className="mx-auto grid max-w-7xl gap-4 px-4 py-5 sm:px-6 lg:grid-cols-[1fr_320px] lg:px-8">
         <div className="grid gap-4">
           <EditorTable
-            title="Group Role Map"
+            title="Minecraft Groups To Discord Roles"
             leftLabel="LuckPerms group"
             rightLabel="Discord role"
             rows={groupRows}
             leftOptions={availableGroups}
             rightRoleOptions={availableRoles}
             onChange={setGroupRows}
+          />
+          <EditorTable
+            title="Discord Roles To Minecraft Groups"
+            leftLabel="Discord role"
+            rightLabel="LuckPerms group"
+            rows={roleRows}
+            leftRoleOptions={availableRoles}
+            rightOptions={availableGroups}
+            onChange={setRoleRows}
           />
           <EditorTable
             title="Linked Accounts"
@@ -353,7 +374,9 @@ function EditorTable({
   rightLabel,
   rows,
   leftOptions,
+  leftRoleOptions,
   rightRoleOptions,
+  rightOptions,
   onChange,
 }: {
   title: string;
@@ -361,7 +384,9 @@ function EditorTable({
   rightLabel: string;
   rows: Row[];
   leftOptions?: string[];
+  leftRoleOptions?: DiscordRole[];
   rightRoleOptions?: DiscordRole[];
+  rightOptions?: string[];
   onChange: (rows: Row[]) => void;
 }) {
   const updateRow = (id: string, patch: Partial<Row>) => {
@@ -392,7 +417,13 @@ function EditorTable({
         ) : (
           rows.map((row) => (
             <div key={row.id} className="grid min-w-[620px] grid-cols-[1fr_1fr_48px] gap-3 border-b px-4 py-3 last:border-b-0">
-              {leftOptions ? (
+              {leftRoleOptions ? (
+                <RoleSelect
+                  value={row.left}
+                  options={leftRoleOptions}
+                  onChange={(value) => updateRow(row.id, { left: value })}
+                />
+              ) : leftOptions ? (
                 <GroupSelect
                   value={row.left}
                   options={leftOptions}
@@ -405,6 +436,12 @@ function EditorTable({
                 <RoleSelect
                   value={row.right}
                   options={rightRoleOptions}
+                  onChange={(value) => updateRow(row.id, { right: value })}
+                />
+              ) : rightOptions ? (
+                <GroupSelect
+                  value={row.right}
+                  options={rightOptions}
                   onChange={(value) => updateRow(row.id, { right: value })}
                 />
               ) : (
@@ -535,6 +572,10 @@ function uniqueRoles(roles: DiscordRole[]) {
 
 function unknownRoles(groupRoleMap: Record<string, string>) {
   return Object.values(groupRoleMap).map((id) => ({ id, name: `Unknown role (${id})` }));
+}
+
+function unknownRoleIds(roleIds: string[]) {
+  return roleIds.map((id) => ({ id, name: `Unknown role (${id})` }));
 }
 
 function roleColor(role: DiscordRole) {

@@ -22,6 +22,16 @@ The shaded plugin jar is produced in `build/libs/discord-paperclip-0.1.0.jar`.
 - A Discord bot with Manage Roles permission
 - Discord Guild Members intent enabled for the bot
 
+## Role Sync
+
+Role sync uses separate directional maps, matching EssentialsX Discord Link:
+
+- `group-role-map` maps LuckPerms group names to Discord role IDs for Minecraft to Discord sync.
+- `role-group-map` maps Discord role IDs to LuckPerms group names for Discord to Minecraft sync.
+
+Do not put an entry in both maps unless you intentionally want both rules to be
+evaluated during full reconciliation.
+
 ## Commands
 
 - `/paperclip reload` reloads configuration and reconnects Discord.

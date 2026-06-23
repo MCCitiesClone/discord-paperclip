@@ -36,5 +36,10 @@ editor:
 linked-accounts: {}
 
 # Map LuckPerms group names to Discord role IDs.
+# These entries sync Minecraft groups to Discord roles.
 group-role-map:
   default: "000000000000000000"
+
+# Map Discord role IDs to LuckPerms group names.
+# These entries sync Discord roles to Minecraft groups.
+role-group-map: {}
