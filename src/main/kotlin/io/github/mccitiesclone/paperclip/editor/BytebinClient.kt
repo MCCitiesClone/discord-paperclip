@@ -64,18 +64,34 @@ class BytebinClient(
     }
 
     fun downloadJson(contentKey: String): java.util.concurrent.CompletableFuture<String> {
-        val request = HttpRequest.newBuilder(contentUri(contentKey))
+        return downloadJson(contentKey, contentPathCandidates(contentKey), 0, null)
+    }
+
+    private fun downloadJson(
+        contentKey: String,
+        candidates: List<String>,
+        index: Int,
+        lastFailure: IllegalStateException?,
+    ): java.util.concurrent.CompletableFuture<String> {
+        if (index >= candidates.size) {
+            return java.util.concurrent.CompletableFuture.failedFuture(
+                lastFailure ?: IllegalStateException("bytebin returned no readable paths for $contentKey"),
+            )
+        }
+
+        val request = HttpRequest.newBuilder(contentUri(candidates[index]))
             .timeout(Duration.ofSeconds(15))
             .header("User-Agent", USER_AGENT)
             .GET()
             .build()
 
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-            .thenApply { response ->
+            .thenCompose { response ->
                 if (response.statusCode() !in 200..299) {
-                    throw IllegalStateException("bytebin returned HTTP ${response.statusCode()} for $contentKey")
+                    val failure = IllegalStateException("bytebin returned HTTP ${response.statusCode()} for $contentKey")
+                    return@thenCompose downloadJson(contentKey, candidates, index + 1, failure)
                 }
-                response.body()
+                java.util.concurrent.CompletableFuture.completedFuture(response.body())
             }
     }
 
@@ -102,7 +118,7 @@ class BytebinClient(
         }
 
         val locationKey = response.headers().firstValue("Location")
-            .map(::extractKey)
+            .map(::extractReadablePath)
             .filter { it.isNotBlank() }
             .orElse(null)
         if (locationKey != null) {
@@ -117,14 +133,53 @@ class BytebinClient(
         val root = json.parseToJsonElement(body).jsonObject
         return root["key"]?.jsonPrimitive?.contentOrNull
             ?: root["id"]?.jsonPrimitive?.contentOrNull
-            ?: root["location"]?.jsonPrimitive?.contentOrNull?.let(::extractKey)
+            ?: root["location"]?.jsonPrimitive?.contentOrNull?.let(::extractReadablePath)
             ?: throw IllegalStateException("bytebin response did not include Location, key, or id")
     }
 
-    private fun contentUri(contentKey: String): URI {
-        val encodedKey = URLEncoder.encode(extractKey(contentKey), StandardCharsets.UTF_8)
-            .replace("+", "%20")
-        return URI.create("$baseUrl/$encodedKey")
+    private fun contentUri(contentPath: String): URI {
+        return URI.create("$baseUrl/${encodePath(contentPath)}")
+    }
+
+    private fun contentPathCandidates(contentKey: String): List<String> {
+        val candidates = linkedSetOf<String>()
+        val key = extractKey(contentKey)
+        if (key.isNotBlank()) {
+            candidates.add(key)
+        }
+
+        val readablePath = extractReadablePath(contentKey)
+        if (readablePath.isNotBlank()) {
+            candidates.add(readablePath)
+        }
+        return candidates.toList()
+    }
+
+    private fun extractReadablePath(value: String): String {
+        val trimmed = value.trim().trimEnd('/')
+        if (!trimmed.contains('/')) {
+            return trimmed
+        }
+
+        val path = runCatching {
+            val uri = URI.create(trimmed)
+            if (uri.scheme != null) {
+                uri.path
+            } else {
+                trimmed
+            }
+        }.getOrElse {
+            trimmed
+        }
+        return path.trim('/')
+    }
+
+    private fun encodePath(path: String): String {
+        return path.trim('/').split('/')
+            .joinToString("/") { segment ->
+                URLEncoder.encode(segment, StandardCharsets.UTF_8)
+                    .replace("+", "%20")
+            }
     }
 
     private fun extractKey(value: String): String {
