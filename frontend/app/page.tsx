@@ -22,8 +22,11 @@ import {
   EditableConfig,
   SessionPayload,
   SignedFrame,
+  exportEditorKeys,
+  exportPublicKey,
   fetchPayload,
   generateEditorKeys,
+  importEditorKeys,
   importServerPublicKey,
   makeNonce,
   signedPacket,
@@ -49,6 +52,7 @@ type Row = {
 
 const bytebinUrl = process.env.NEXT_PUBLIC_BYTEBIN_URL ?? "";
 const bytesocksUrl = process.env.NEXT_PUBLIC_BYTESOCKS_URL ?? "";
+const editorKeysStorageKey = "discord-paperclip-editor-keys-v1";
 
 export default function Home() {
   const [sessionId, setSessionId] = useState("");
@@ -125,13 +129,10 @@ export default function Home() {
       setAvailableGroups(uniqueSorted([...(loaded.availableGroups ?? []), ...Object.keys(loaded.config.groupRoleMap)]));
       setAvailableRoles(uniqueRoles([...(loaded.availableDiscordRoles ?? []), ...unknownRoles(loaded.config.groupRoleMap)]));
 
-      const keys = await generateEditorKeys();
+      const keys = await loadEditorKeys();
       privateKeyRef.current = keys.privateKey;
       serverKeyRef.current = await importServerPublicKey(loaded.serverPublicKey);
-      const browserPublicKey = await crypto.subtle.exportKey("spki", keys.publicKey);
-      const browserPublicKeyText = btoa(
-        String.fromCharCode(...new Uint8Array(browserPublicKey)),
-      );
+      const browserPublicKeyText = await exportPublicKey(keys.publicKey);
       const nextNonce = makeNonce();
       setNonce(nextNonce);
       setState("connecting");
@@ -541,4 +542,19 @@ function roleColor(role: DiscordRole) {
     return "transparent";
   }
   return `#${role.color.toString(16).padStart(6, "0")}`;
+}
+
+async function loadEditorKeys() {
+  const stored = localStorage.getItem(editorKeysStorageKey);
+  if (stored) {
+    try {
+      return await importEditorKeys(JSON.parse(stored));
+    } catch {
+      localStorage.removeItem(editorKeysStorageKey);
+    }
+  }
+
+  const keys = await generateEditorKeys();
+  localStorage.setItem(editorKeysStorageKey, JSON.stringify(await exportEditorKeys(keys)));
+  return keys;
 }

@@ -25,17 +25,49 @@ export type SignedFrame = {
   signature: string;
 };
 
+const editorKeyAlgorithm = {
+  name: "RSASSA-PKCS1-v1_5",
+  modulusLength: 2048,
+  publicExponent: new Uint8Array([1, 0, 1]),
+  hash: "SHA-256",
+} as const;
+
+type StoredEditorKeys = {
+  publicKey: JsonWebKey;
+  privateKey: JsonWebKey;
+};
+
 export async function generateEditorKeys() {
   return crypto.subtle.generateKey(
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: "SHA-256",
-    },
+    editorKeyAlgorithm,
     true,
     ["sign", "verify"],
   );
+}
+
+export async function exportEditorKeys(keys: CryptoKeyPair) {
+  return {
+    publicKey: await crypto.subtle.exportKey("jwk", keys.publicKey),
+    privateKey: await crypto.subtle.exportKey("jwk", keys.privateKey),
+  };
+}
+
+export async function importEditorKeys(stored: StoredEditorKeys) {
+  const publicKey = await crypto.subtle.importKey(
+    "jwk",
+    stored.publicKey,
+    editorKeyAlgorithm,
+    true,
+    ["verify"],
+  );
+  const privateKey = await crypto.subtle.importKey(
+    "jwk",
+    stored.privateKey,
+    editorKeyAlgorithm,
+    true,
+    ["sign"],
+  );
+  return { publicKey, privateKey };
 }
 
 export async function exportPublicKey(publicKey: CryptoKey) {

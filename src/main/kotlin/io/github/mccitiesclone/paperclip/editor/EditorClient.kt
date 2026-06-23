@@ -48,7 +48,7 @@ class EditorClient(
     private val bytebin = BytebinClient(client, config.editor.bytebinUrl)
     private val json = Json { ignoreUnknownKeys = true }
     private val activeSessions = ConcurrentHashMap<String, ActiveEditorSession>()
-    private val pendingTrust = ConcurrentHashMap<String, ActiveEditorSession>()
+    private val pendingTrust = ConcurrentHashMap<String, PendingEditorTrust>()
 
     fun createSession(applyChanges: (EditorResult) -> EditorResult): CompletableFuture<EditorSession> {
         if (config.editor.baseUrl.isBlank()) {
@@ -88,8 +88,13 @@ class EditorClient(
     }
 
     fun trust(nonce: String): String? {
-        val session = pendingTrust.remove(nonce) ?: return null
-        val editorKey = session.editorPublicKey ?: return null
+        val pending = pendingTrust.remove(nonce) ?: return null
+        val session = pending.session
+        val editorKey = pending.editorKey
+        if (session.editorNonce != nonce || !sameKey(session.editorPublicKey, editorKey)) {
+            logger.warning("Ignored stale editor trust nonce $nonce for session ${session.bytebinId}")
+            return null
+        }
         session.trusted = true
         session.sendHelloReply(accepted = true, trustRequired = false)
         val fingerprint = fingerprint(editorKey)
@@ -337,6 +342,7 @@ class EditorClient(
         }
 
         val nonce = packet["nonce"]?.jsonPrimitive?.contentOrNull ?: UUID.randomUUID().toString().take(8)
+        pendingTrust.entries.removeIf { it.value.session === session }
         session.editorPublicKey = editorKey
         session.editorNonce = nonce
 
@@ -345,7 +351,7 @@ class EditorClient(
         if (trusted) {
             session.sendHelloReply(accepted = true, trustRequired = false)
         } else {
-            pendingTrust[nonce] = session
+            pendingTrust[nonce] = PendingEditorTrust(session, editorKey)
             session.sendHelloReply(accepted = false, trustRequired = true)
             logger.info("Editor session ${session.bytebinId} is waiting for trust. Run /paperclip editor trust $nonce")
         }
@@ -428,6 +434,11 @@ class EditorClient(
         }
     }
 
+    private data class PendingEditorTrust(
+        val session: ActiveEditorSession,
+        val editorKey: PublicKey,
+    )
+
     private fun EditorResult.toJson(): JsonObject =
         buildJsonObject {
             put("groupRoleMap", JsonObject(groupRoleMap.mapValues { JsonPrimitive(it.value) }))
@@ -473,3 +484,6 @@ private fun fingerprint(publicKey: PublicKey): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(publicKey.encoded)
     return digest.joinToString(":") { "%02x".format(it) }
 }
+
+private fun sameKey(first: PublicKey?, second: PublicKey): Boolean =
+    first?.encoded?.contentEquals(second.encoded) == true
