@@ -4,6 +4,8 @@ import io.github.mccitiesclone.paperclip.DiscordPaperclipPlugin
 import io.github.mccitiesclone.paperclip.PaperclipConfig
 import io.github.mccitiesclone.paperclip.discord.DiscordService
 import io.github.mccitiesclone.paperclip.luckperms.LuckPermsService
+import net.luckperms.api.event.EventSubscription
+import net.luckperms.api.event.node.NodeMutateEvent
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerJoinEvent
@@ -20,6 +22,7 @@ class SyncService(
     private val logger: Logger,
 ) : Listener {
     private var periodicTask: BukkitTask? = null
+    private var luckPermsSubscription: EventSubscription<NodeMutateEvent>? = null
     private val linkedAccounts = ConcurrentHashMap(config.linkedAccounts)
     private val groupToRole = config.groupRoleMap
     private val roleToGroup = groupToRole.entries.associate { (group, roleId) -> roleId to group }
@@ -27,6 +30,10 @@ class SyncService(
     private val managedRoles = groupToRole.values.toSet()
 
     fun start() {
+        if (config.sync.minecraftToDiscord) {
+            luckPermsSubscription = luckPerms.subscribeToGroupChanges(::handleMinecraftGroupUpdate)
+        }
+
         if (config.sync.intervalSeconds > 0) {
             periodicTask = plugin.server.scheduler.runTaskTimerAsynchronously(
                 plugin,
@@ -40,6 +47,8 @@ class SyncService(
     fun shutdown() {
         periodicTask?.cancel()
         periodicTask = null
+        luckPermsSubscription?.close()
+        luckPermsSubscription = null
     }
 
     fun syncAll() {
@@ -73,6 +82,15 @@ class SyncService(
             ?: return
 
         syncDiscordToMinecraft(minecraftUuid, discordUserId)
+    }
+
+    fun handleMinecraftGroupUpdate(minecraftUuid: UUID) {
+        if (!config.sync.minecraftToDiscord) {
+            return
+        }
+
+        val discordUserId = linkedAccounts[minecraftUuid] ?: return
+        syncMinecraftToDiscord(minecraftUuid, discordUserId)
     }
 
     @EventHandler

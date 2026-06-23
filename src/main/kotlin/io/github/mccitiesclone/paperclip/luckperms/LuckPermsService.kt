@@ -1,6 +1,8 @@
 package io.github.mccitiesclone.paperclip.luckperms
 
 import net.luckperms.api.LuckPermsProvider
+import net.luckperms.api.event.EventSubscription
+import net.luckperms.api.event.node.NodeMutateEvent
 import net.luckperms.api.model.data.DataMutateResult
 import net.luckperms.api.model.user.User
 import net.luckperms.api.node.NodeType
@@ -11,6 +13,27 @@ import java.util.logging.Logger
 
 class LuckPermsService(private val logger: Logger) {
     private val luckPerms = LuckPermsProvider.get()
+
+    fun subscribeToGroupChanges(handler: (UUID) -> Unit): EventSubscription<NodeMutateEvent> =
+        luckPerms.eventBus.subscribe(NodeMutateEvent::class.java) { event ->
+            val user = event.target as? User ?: return@subscribe
+            val beforeGroups = event.dataBefore
+                .asSequence()
+                .filter { it.type == NodeType.INHERITANCE }
+                .mapNotNull { it as? InheritanceNode }
+                .map { it.groupName }
+                .toSet()
+            val afterGroups = event.dataAfter
+                .asSequence()
+                .filter { it.type == NodeType.INHERITANCE }
+                .mapNotNull { it as? InheritanceNode }
+                .map { it.groupName }
+                .toSet()
+
+            if (beforeGroups != afterGroups) {
+                handler(user.uniqueId)
+            }
+        }
 
     fun availableGroupNames(): Set<String> =
         luckPerms.groupManager.loadedGroups.map { it.name }.toSet()
