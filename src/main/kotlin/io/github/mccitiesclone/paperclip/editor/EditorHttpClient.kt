@@ -19,7 +19,7 @@ import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509ExtendedTrustManager
 import javax.net.ssl.X509TrustManager
 
-internal fun editorHttpClient(
+fun editorHttpClient(
     settings: EditorSettings,
     dataFolder: Path,
     logger: Logger,

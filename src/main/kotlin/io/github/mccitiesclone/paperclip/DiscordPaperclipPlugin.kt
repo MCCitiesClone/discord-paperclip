@@ -1,14 +1,18 @@
 package io.github.mccitiesclone.paperclip
 
 import io.github.mccitiesclone.paperclip.command.PaperclipCommand
+import io.github.mccitiesclone.paperclip.command.LinkCommand
 import io.github.mccitiesclone.paperclip.discord.DiscordService
 import io.github.mccitiesclone.paperclip.editor.EditorClient
 import io.github.mccitiesclone.paperclip.editor.EditorResult
+import io.github.mccitiesclone.paperclip.link.LinkService
 import io.github.mccitiesclone.paperclip.luckperms.LuckPermsService
 import io.github.mccitiesclone.paperclip.sync.SyncService
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents
 import org.bukkit.event.HandlerList
 import org.bukkit.plugin.java.JavaPlugin
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 class DiscordPaperclipPlugin : JavaPlugin() {
     private lateinit var pluginConfig: PaperclipConfig
@@ -17,6 +21,8 @@ class DiscordPaperclipPlugin : JavaPlugin() {
     internal lateinit var syncService: SyncService
         private set
     internal lateinit var editorClient: EditorClient
+        private set
+    internal lateinit var linkService: LinkService
         private set
 
     override fun onEnable() {
@@ -68,6 +74,24 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         return result
     }
 
+    fun completeAccountLink(minecraftUuid: UUID, discordUserId: String) {
+        if (server.isPrimaryThread) {
+            saveAccountLink(minecraftUuid, discordUserId)
+            return
+        }
+
+        val future = CompletableFuture<Void>()
+        server.scheduler.runTask(this, Runnable {
+            runCatching {
+                saveAccountLink(minecraftUuid, discordUserId)
+            }.fold(
+                { future.complete(null) },
+                future::completeExceptionally,
+            )
+        })
+        future.join()
+    }
+
     fun trustEditorKey(fingerprint: String) {
         val trustedKeys = config.getStringList("editor.trusted-editor-keys").toMutableSet()
         trustedKeys += fingerprint
@@ -81,15 +105,28 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         discordService = DiscordService(pluginConfig, logger)
         syncService = SyncService(this, pluginConfig, luckPermsService, discordService, logger)
         editorClient = EditorClient(pluginConfig, dataFolder.toPath(), logger, luckPermsService::availableGroupNames)
+        linkService = LinkService(pluginConfig, dataFolder.toPath(), logger, ::completeAccountLink)
 
-        discordService.start(syncService::handleDiscordMemberRoleUpdate)
+        discordService.start(syncService::handleDiscordMemberRoleUpdate, linkService::completeCode)
         syncService.start()
     }
 
     private fun registerCommand() {
-        val command = PaperclipCommand(plugin = this, reloadAction = ::reloadPlugin)
+        val paperclipCommand = PaperclipCommand(plugin = this, reloadAction = ::reloadPlugin)
+        val linkCommand = LinkCommand(plugin = this)
         lifecycleManager.registerEventHandler(LifecycleEvents.COMMANDS) { event ->
-            event.registrar().register("paperclip", "Manage Discord Paperclip.", command)
+            event.registrar().register("paperclip", "Manage Discord Paperclip.", paperclipCommand)
+            event.registrar().register("link", "Link your Minecraft account to Discord.", linkCommand)
         }
+    }
+
+    private fun saveAccountLink(minecraftUuid: UUID, discordUserId: String) {
+        config.set("linked-accounts.$minecraftUuid", discordUserId)
+        saveConfig()
+        reloadConfig()
+        syncService.linkAccount(minecraftUuid, discordUserId)
+        server.scheduler.runTaskAsynchronously(this, Runnable {
+            syncService.syncAccount(minecraftUuid, discordUserId)
+        })
     }
 }

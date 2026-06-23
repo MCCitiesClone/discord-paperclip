@@ -15,3 +15,6 @@ permissions:
   paperclip.admin:
     description: Allows managing Discord Paperclip.
     default: op
+  paperclip.link:
+    description: Allows linking a Minecraft account to Discord.
+    default: true

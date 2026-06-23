@@ -1,14 +1,19 @@
 package io.github.mccitiesclone.paperclip.discord
 
 import io.github.mccitiesclone.paperclip.PaperclipConfig
+import io.github.mccitiesclone.paperclip.link.LinkResult
 import net.dv8tion.jda.api.JDA
 import net.dv8tion.jda.api.JDABuilder
+import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
+import net.dv8tion.jda.api.events.session.ReadyEvent
 import net.dv8tion.jda.api.entities.Guild
 import net.dv8tion.jda.api.entities.Role
 import net.dv8tion.jda.api.entities.UserSnowflake
 import net.dv8tion.jda.api.events.guild.member.GuildMemberRoleAddEvent
 import net.dv8tion.jda.api.events.guild.member.GuildMemberRoleRemoveEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
+import net.dv8tion.jda.api.interactions.commands.OptionType
+import net.dv8tion.jda.api.interactions.commands.build.Commands
 import net.dv8tion.jda.api.requests.GatewayIntent
 import java.util.concurrent.CompletableFuture
 import java.util.logging.Logger
@@ -20,7 +25,10 @@ class DiscordService(
     @Volatile
     private var jda: JDA? = null
 
-    fun start(roleUpdateHandler: (discordUserId: String) -> Unit) {
+    fun start(
+        roleUpdateHandler: (discordUserId: String) -> Unit,
+        linkHandler: (discordUserId: String, code: String) -> CompletableFuture<LinkResult>,
+    ) {
         if (config.discordToken.isBlank() || config.discordToken == "replace-me") {
             logger.warning("Discord token is not configured; Discord sync is disabled.")
             return
@@ -32,7 +40,10 @@ class DiscordService(
 
         jda = JDABuilder.createDefault(config.discordToken)
             .enableIntents(GatewayIntent.GUILD_MEMBERS)
-            .addEventListeners(RoleChangeListener(config.guildId, roleUpdateHandler))
+            .addEventListeners(
+                RoleChangeListener(config.guildId, roleUpdateHandler),
+                LinkSlashListener(config.guildId, linkHandler, logger),
+            )
             .build()
     }
 
@@ -120,6 +131,52 @@ private class RoleChangeListener(
     override fun onGuildMemberRoleRemove(event: GuildMemberRoleRemoveEvent) {
         if (event.guild.id == guildId) {
             roleUpdateHandler(event.user.id)
+        }
+    }
+}
+
+private class LinkSlashListener(
+    private val guildId: String,
+    private val linkHandler: (discordUserId: String, code: String) -> CompletableFuture<LinkResult>,
+    private val logger: Logger,
+) : ListenerAdapter() {
+    override fun onReady(event: ReadyEvent) {
+        val guild = event.jda.getGuildById(guildId)
+        if (guild == null) {
+            logger.warning("Could not register Discord /link command because guild $guildId is unavailable.")
+            return
+        }
+
+        guild.upsertCommand(
+            Commands.slash("link", "Link your Discord account to your Minecraft account.")
+                .addOption(OptionType.STRING, "code", "The code from Minecraft /link.", true)
+        ).queue(
+            { logger.info("Registered Discord /link slash command in guild $guildId.") },
+            { throwable -> logger.warning("Failed to register Discord /link slash command: ${throwable.message}") },
+        )
+    }
+
+    override fun onSlashCommandInteraction(event: SlashCommandInteractionEvent) {
+        if (event.name != "link" || event.guild?.id != guildId) {
+            return
+        }
+
+        val code = event.getOption("code")?.asString.orEmpty()
+        event.deferReply(true).queue()
+        linkHandler(event.user.id, code).whenComplete { result, throwable ->
+            val message = when {
+                throwable != null -> "Could not link accounts: ${throwable.message ?: throwable.javaClass.simpleName}"
+                result is LinkResult.Linked -> {
+                    val name = result.minecraftName.ifBlank { result.minecraftUuid.toString() }
+                    "Linked your Discord account to Minecraft account $name."
+                }
+                result is LinkResult.Failed -> result.reason
+                else -> "Could not link accounts."
+            }
+            event.hook.editOriginal(message).queue(
+                {},
+                { replyError -> logger.warning("Failed to send Discord /link response: ${replyError.message}") },
+            )
         }
     }
 }

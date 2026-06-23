@@ -9,6 +9,7 @@ import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.scheduler.BukkitTask
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.logging.Logger
 
 class SyncService(
@@ -19,6 +20,7 @@ class SyncService(
     private val logger: Logger,
 ) : Listener {
     private var periodicTask: BukkitTask? = null
+    private val linkedAccounts = ConcurrentHashMap(config.linkedAccounts)
     private val groupToRole = config.groupRoleMap
     private val roleToGroup = groupToRole.entries.associate { (group, roleId) -> roleId to group }
     private val managedGroups = groupToRole.keys
@@ -41,9 +43,13 @@ class SyncService(
     }
 
     fun syncAll() {
-        config.linkedAccounts.forEach { (minecraftUuid, discordUserId) ->
+        linkedAccounts.forEach { (minecraftUuid, discordUserId) ->
             syncAccount(minecraftUuid, discordUserId)
         }
+    }
+
+    fun linkAccount(minecraftUuid: UUID, discordUserId: String) {
+        linkedAccounts[minecraftUuid] = discordUserId
     }
 
     fun syncAccount(minecraftUuid: UUID, discordUserId: String) {
@@ -61,7 +67,7 @@ class SyncService(
             return
         }
 
-        val minecraftUuid = config.linkedAccounts.entries
+        val minecraftUuid = linkedAccounts.entries
             .firstOrNull { it.value == discordUserId }
             ?.key
             ?: return
@@ -71,7 +77,7 @@ class SyncService(
 
     @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
-        val discordUserId = config.linkedAccounts[event.player.uniqueId] ?: return
+        val discordUserId = linkedAccounts[event.player.uniqueId] ?: return
         plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
             syncAccount(event.player.uniqueId, discordUserId)
         })
