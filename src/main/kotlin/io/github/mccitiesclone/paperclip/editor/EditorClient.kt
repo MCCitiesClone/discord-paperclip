@@ -54,7 +54,7 @@ class EditorClient(
             return CompletableFuture.failedFuture(IllegalStateException("editor.bytesocks-url is not configured"))
         }
 
-        val channelId = UUID.randomUUID().toString()
+        val channelId = UUID.randomUUID().toString().replace("-", "")
         val keyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
         val initialPayload = initialPayloadJson(channelId, keyPair.public).toString()
 

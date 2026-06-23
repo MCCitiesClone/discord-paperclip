@@ -30,6 +30,7 @@ import {
   signedPacket,
   uploadPayload,
   verifyFrame,
+  websocketUrl,
 } from "@/lib/paperclip-protocol";
 
 type ConnectionState =
@@ -143,7 +144,7 @@ export default function Home() {
       setState("connecting");
       setNotice("Opening relay channel...");
 
-      const socket = new WebSocket(`${bytesocksUrl.replace(/\/$/, "")}/${loaded.channelId}`);
+      const socket = new WebSocket(websocketUrl(bytesocksUrl, loaded.channelId));
       socketRef.current = socket;
 
       socket.addEventListener("open", async () => {

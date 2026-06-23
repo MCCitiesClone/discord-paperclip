@@ -42,7 +42,7 @@ data class PaperclipConfig(
                 editor = EditorSettings(
                     baseUrl = config.getString("editor.base-url").orEmpty().trimEnd('/'),
                     bytebinUrl = config.getString("editor.bytebin-url").orEmpty().trimEnd('/'),
-                    bytesocksUrl = config.getString("editor.bytesocks-url").orEmpty().trimEnd('/'),
+                    bytesocksUrl = normalizeWebSocketUrl(config.getString("editor.bytesocks-url").orEmpty()),
                     sessionTtlSeconds = config.getLong("editor.session-ttl-seconds", 900L),
                     trustedCaCertificates = config.getStringList("editor.trusted-ca-certificates"),
                     allowInsecureTls = config.getBoolean("editor.allow-insecure-tls", false),
@@ -51,6 +51,17 @@ data class PaperclipConfig(
                 linkedAccounts = linkedAccounts,
                 groupRoleMap = groupRoleMap,
             )
+        }
+
+        private fun normalizeWebSocketUrl(value: String): String {
+            val trimmed = value.trim().trimEnd('/')
+            return when {
+                trimmed.startsWith("wss://https://", ignoreCase = true) -> "wss://${trimmed.substringAfter("wss://https://")}"
+                trimmed.startsWith("ws://http://", ignoreCase = true) -> "ws://${trimmed.substringAfter("ws://http://")}"
+                trimmed.startsWith("https://", ignoreCase = true) -> "wss://${trimmed.substringAfter("https://")}"
+                trimmed.startsWith("http://", ignoreCase = true) -> "ws://${trimmed.substringAfter("http://")}"
+                else -> trimmed
+            }
         }
     }
 }

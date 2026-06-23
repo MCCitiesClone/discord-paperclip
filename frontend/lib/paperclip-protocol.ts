@@ -113,6 +113,10 @@ export async function uploadPayload(bytebinUrl: string, body: unknown) {
   return parseContentKey(response);
 }
 
+export function websocketUrl(bytesocksUrl: string, channelId: string) {
+  return `${normalizeWebSocketBaseUrl(bytesocksUrl)}/${encodeURIComponent(channelId)}`;
+}
+
 async function postBytebin(bytebinUrl: string, jsonBody: string, gzip: boolean) {
   const headers: HeadersInit = {
     "Content-Type": "application/json",
@@ -170,6 +174,23 @@ async function parseContentKey(response: Response) {
 
 function trimBytebinUrl(bytebinUrl: string) {
   return bytebinUrl.trim().replace(/\/$/, "");
+}
+
+function normalizeWebSocketBaseUrl(bytesocksUrl: string) {
+  const trimmed = bytesocksUrl.trim().replace(/\/$/, "");
+  if (/^wss:\/\/https:\/\//i.test(trimmed)) {
+    return `wss://${trimmed.replace(/^wss:\/\/https:\/\//i, "")}`;
+  }
+  if (/^ws:\/\/http:\/\//i.test(trimmed)) {
+    return `ws://${trimmed.replace(/^ws:\/\/http:\/\//i, "")}`;
+  }
+  if (/^https:\/\//i.test(trimmed)) {
+    return `wss://${trimmed.replace(/^https:\/\//i, "")}`;
+  }
+  if (/^http:\/\//i.test(trimmed)) {
+    return `ws://${trimmed.replace(/^http:\/\//i, "")}`;
+  }
+  return trimmed;
 }
 
 function extractContentKey(value: string) {
