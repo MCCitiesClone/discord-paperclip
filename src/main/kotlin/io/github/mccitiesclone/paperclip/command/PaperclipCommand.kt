@@ -68,6 +68,11 @@ class PaperclipCommand(
     }
 
     private fun applyEditorChanges(result: EditorResult): EditorResult {
+        // Group/role creation, recolouring and reordering must happen off the main thread because
+        // they issue blocking Discord calls and await LuckPerms storage writes. This callback runs
+        // on the editor websocket handler thread, so apply them here before touching the config.
+        plugin.applyRoleManagement(result)
+
         if (plugin.server.isPrimaryThread) {
             val refreshed = plugin.applyEditorUpdate(result)
             plugin.server.scheduler.runTaskLater(plugin, Runnable { reloadAction() }, 40L)

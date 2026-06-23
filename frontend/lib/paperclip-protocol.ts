@@ -11,14 +11,46 @@ export type SessionPayload = {
   channelId: string;
   serverPublicKey: string;
   availableGroups?: string[];
+  groups?: GroupInfo[];
   availableDiscordRoles?: DiscordRole[];
   config: EditableConfig;
+};
+
+/**
+ * The payload the plugin re-uploads after applying changes. Mirrors the data half of
+ * {@link SessionPayload} so the editor can refresh its tables and role-management page.
+ */
+export type RefreshedPayload = {
+  config: EditableConfig;
+  availableGroups?: string[];
+  groups?: GroupInfo[];
+  availableDiscordRoles?: DiscordRole[];
 };
 
 export type DiscordRole = {
   id: string;
   name: string;
   color?: number;
+  position?: number;
+};
+
+export type GroupInfo = {
+  name: string;
+  displayName?: string;
+  weight?: number;
+};
+
+/** A LuckPerms group the editor wants to exist, in priority order (first = highest weight). */
+export type DesiredGroup = {
+  name: string;
+  displayName: string;
+};
+
+/** A Discord role the editor wants to exist, in display order (first = top). */
+export type DesiredDiscordRole = {
+  id: string | null;
+  name: string;
+  color: number;
 };
 
 export type SignedFrame = {

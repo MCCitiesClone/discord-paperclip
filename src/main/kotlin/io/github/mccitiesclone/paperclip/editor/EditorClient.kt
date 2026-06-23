@@ -1,13 +1,18 @@
 package io.github.mccitiesclone.paperclip.editor
 
 import io.github.mccitiesclone.paperclip.PaperclipConfig
+import io.github.mccitiesclone.paperclip.discord.DesiredDiscordRole
 import io.github.mccitiesclone.paperclip.discord.DiscordRole
+import io.github.mccitiesclone.paperclip.luckperms.DesiredGroup
+import io.github.mccitiesclone.paperclip.luckperms.GroupInfo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
@@ -41,7 +46,7 @@ class EditorClient(
     private val config: PaperclipConfig,
     dataFolder: Path,
     private val logger: Logger,
-    private val availableGroupNames: () -> Set<String>,
+    private val availableGroups: () -> List<GroupInfo>,
     private val availableDiscordRoles: () -> List<DiscordRole>,
 ) {
     private val client = editorHttpClient(config.editor, dataFolder, logger)
@@ -238,16 +243,30 @@ class EditorClient(
             put("channelId", JsonPrimitive(channelId))
             put("serverPublicKey", JsonPrimitive(encodeKey(publicKey)))
             put("availableGroups", availableGroupsJson())
+            put("groups", groupsJson())
             put("availableDiscordRoles", availableDiscordRolesJson())
             put("config", editableConfigJson())
         }
 
     private fun availableGroupsJson(): JsonArray =
         JsonArray(
-            (availableGroupNames() + config.groupRoleMap.keys + config.roleGroupMap.values)
+            (availableGroups().map { it.name } + config.groupRoleMap.keys + config.roleGroupMap.values)
                 .filter { it.isNotBlank() }
                 .sorted()
                 .map { JsonPrimitive(it) }
+        )
+
+    private fun groupsJson(): JsonArray =
+        JsonArray(
+            availableGroups()
+                .filter { it.name.isNotBlank() }
+                .map { group ->
+                    buildJsonObject {
+                        put("name", JsonPrimitive(group.name))
+                        put("displayName", JsonPrimitive(group.displayName.orEmpty()))
+                        put("weight", JsonPrimitive(group.weight))
+                    }
+                }
         )
 
     private fun availableDiscordRolesJson(): JsonArray =
@@ -259,6 +278,7 @@ class EditorClient(
                         put("id", JsonPrimitive(role.id))
                         put("name", JsonPrimitive(role.name))
                         put("color", JsonPrimitive(role.color))
+                        put("position", JsonPrimitive(role.position))
                     }
                 }
         )
@@ -287,7 +307,38 @@ class EditorClient(
             ?.filterValues { it.isNotBlank() }
             ?: emptyMap()
 
-        return EditorResult(groupRoleMap, roleGroupMap, linkedAccounts)
+        val managedGroups = root["groups"]?.jsonArray
+            ?.mapNotNull { element ->
+                val group = element.jsonObject
+                val name = group["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                if (name.isBlank()) {
+                    null
+                } else {
+                    DesiredGroup(
+                        name = name,
+                        displayName = group["displayName"]?.jsonPrimitive?.contentOrNull?.trim()?.ifBlank { null },
+                    )
+                }
+            }
+            ?: emptyList()
+
+        val managedDiscordRoles = root["discordRoles"]?.jsonArray
+            ?.mapNotNull { element ->
+                val role = element.jsonObject
+                val name = role["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                if (name.isBlank()) {
+                    null
+                } else {
+                    DesiredDiscordRole(
+                        id = role["id"]?.jsonPrimitive?.contentOrNull?.trim()?.ifBlank { null },
+                        name = name,
+                        color = role["color"]?.jsonPrimitive?.intOrNull ?: 0,
+                    )
+                }
+            }
+            ?: emptyList()
+
+        return EditorResult(groupRoleMap, roleGroupMap, linkedAccounts, managedGroups, managedDiscordRoles)
     }
 
     private inner class SocketListener(
@@ -368,7 +419,7 @@ class EditorClient(
         downloadPayload(payloadId)
             .thenApply(::parseResult)
             .thenApply(session.applyChanges)
-            .thenCompose { refreshed -> uploadPayload(refreshed.toJson().toString()) }
+            .thenCompose { refreshed -> uploadPayload(refreshedPayloadJson(refreshed).toString()) }
             .whenComplete { refreshedPayloadId, throwable ->
                 if (throwable != null) {
                     session.send(
@@ -445,11 +496,24 @@ class EditorClient(
         val editorKey: PublicKey,
     )
 
-    private fun EditorResult.toJson(): JsonObject =
+    /**
+     * The payload returned to the editor after changes are applied. Mirrors the session payload's
+     * data so the editor can refresh its tables and role-management page with freshly created
+     * groups/roles, new Discord role ids, and updated weights/positions.
+     */
+    private fun refreshedPayloadJson(result: EditorResult): JsonObject =
         buildJsonObject {
-            put("groupRoleMap", JsonObject(groupRoleMap.mapValues { JsonPrimitive(it.value) }))
-            put("roleGroupMap", JsonObject(roleGroupMap.mapValues { JsonPrimitive(it.value) }))
-            put("linkedAccounts", JsonObject(linkedAccounts.mapValues { JsonPrimitive(it.value) }))
+            put(
+                "config",
+                buildJsonObject {
+                    put("groupRoleMap", JsonObject(result.groupRoleMap.mapValues { JsonPrimitive(it.value) }))
+                    put("roleGroupMap", JsonObject(result.roleGroupMap.mapValues { JsonPrimitive(it.value) }))
+                    put("linkedAccounts", JsonObject(result.linkedAccounts.mapValues { JsonPrimitive(it.value) }))
+                },
+            )
+            put("availableGroups", availableGroupsJson())
+            put("groups", groupsJson())
+            put("availableDiscordRoles", availableDiscordRolesJson())
         }
 }
 
@@ -463,6 +527,8 @@ data class EditorResult(
     val groupRoleMap: Map<String, String>,
     val roleGroupMap: Map<String, String>,
     val linkedAccounts: Map<String, String>,
+    val managedGroups: List<DesiredGroup> = emptyList(),
+    val managedDiscordRoles: List<DesiredDiscordRole> = emptyList(),
 )
 
 private fun sign(message: String, privateKey: PrivateKey): String {

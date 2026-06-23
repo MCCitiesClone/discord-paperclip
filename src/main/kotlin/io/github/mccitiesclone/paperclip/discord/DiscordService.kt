@@ -4,6 +4,7 @@ import io.github.mccitiesclone.paperclip.PaperclipConfig
 import io.github.mccitiesclone.paperclip.link.LinkResult
 import net.dv8tion.jda.api.JDA
 import net.dv8tion.jda.api.JDABuilder
+import net.dv8tion.jda.api.Permission
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent
 import net.dv8tion.jda.api.events.session.ReadyEvent
 import net.dv8tion.jda.api.entities.Guild
@@ -70,10 +71,119 @@ class DiscordService(
             ?.roles
             ?.asSequence()
             ?.filterNot { it.isPublicRole || it.isManaged }
-            ?.map { role -> DiscordRole(id = role.id, name = role.name, color = role.colorRaw) }
-            ?.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, DiscordRole::name).thenBy(DiscordRole::id))
+            ?.map { role -> DiscordRole(id = role.id, name = role.name, color = role.colorRaw, position = role.position) }
+            ?.sortedWith(compareByDescending(DiscordRole::position).thenBy(String.CASE_INSENSITIVE_ORDER, DiscordRole::name))
             ?.toList()
             ?: emptyList()
+
+    /**
+     * Reconciles the guild's manageable roles against the editor's desired list. Entries without an
+     * id are created; entries with an id are renamed/recoloured when changed. The list order (first =
+     * top) is applied to the roles the bot can move. Roles are never deleted.
+     *
+     * This issues blocking JDA calls and MUST be invoked off the server's main thread and off JDA's
+     * own websocket thread (the editor websocket handler thread is fine).
+     */
+    fun applyDiscordRoleChanges(desired: List<DesiredDiscordRole>) {
+        if (desired.isEmpty()) {
+            return
+        }
+        val guild = guild() ?: return
+
+        val orderedTopToBottom = ArrayList<Role>(desired.size)
+        desired.forEach { request ->
+            val name = request.name.trim()
+            if (name.isBlank()) {
+                return@forEach
+            }
+            val color = request.color.takeIf { it in 1..0xFFFFFF }
+            val existingId = request.id?.trim().orEmpty()
+
+            val role = if (existingId.isBlank()) {
+                createRole(guild, name, color)
+            } else {
+                updateRole(guild, existingId, name, color)
+            }
+            if (role != null) {
+                orderedTopToBottom += role
+            }
+        }
+
+        reorderRoles(guild, orderedTopToBottom)
+    }
+
+    private fun createRole(guild: Guild, name: String, color: Int?): Role? {
+        if (!guild.selfMember.hasPermission(Permission.MANAGE_ROLES)) {
+            logger.warning("Cannot create Discord role $name: bot lacks Manage Roles permission.")
+            return null
+        }
+        // Discord treats role colour 0 as "no colour" (inherit). JDA reports an unset colour back as
+        // Role.DEFAULT_COLOR_RAW, so we write 0 but compare reads against the sentinel below.
+        return runCatching {
+            guild.createRole().setName(name).setColor(color ?: 0).complete()
+        }.onFailure {
+            logger.warning("Failed to create Discord role $name: ${it.message}")
+        }.getOrNull()
+    }
+
+    private fun updateRole(guild: Guild, roleId: String, name: String, color: Int?): Role? {
+        val role = guild.getRoleById(roleId) ?: run {
+            logger.warning("Discord role $roleId no longer exists; skipping update.")
+            return null
+        }
+        if (role.isManaged || role.isPublicRole || !guild.selfMember.canInteract(role)) {
+            // Keep it in the ordering reference, but the bot cannot edit it.
+            return role
+        }
+
+        val targetColorRaw = color ?: Role.DEFAULT_COLOR_RAW
+        val needsRename = role.name != name
+        val needsRecolor = role.colorRaw != targetColorRaw
+        if (needsRename || needsRecolor) {
+            runCatching {
+                val manager = role.manager
+                if (needsRename) manager.setName(name)
+                if (needsRecolor) manager.setColor(color ?: 0)
+                manager.complete()
+            }.onFailure {
+                logger.warning("Failed to update Discord role ${role.name} ($roleId): ${it.message}")
+            }
+        }
+        return role
+    }
+
+    /**
+     * Re-orders the supplied roles (first = highest) within the position slots they already occupy,
+     * leaving roles the bot cannot move untouched. Best effort: failures are logged, not thrown.
+     */
+    private fun reorderRoles(guild: Guild, orderedTopToBottom: List<Role>) {
+        val movable = orderedTopToBottom.filter { guild.selfMember.canInteract(it) && !it.isPublicRole }
+        if (movable.size < 2) {
+            return
+        }
+
+        runCatching {
+            val action = guild.modifyRolePositions()
+            val current = action.currentOrder.toMutableList()
+            // modifyRolePositions() may hand back roles in ascending or descending order; detect it
+            // so we map our top-to-bottom intent onto the action's orientation.
+            val ascending = current.size >= 2 && current.first().position <= current.last().position
+            val desiredSequence = if (ascending) movable.asReversed() else movable
+
+            val movableIds = movable.map { it.id }.toSet()
+            val slots = current.indices.filter { current[it].id in movableIds }
+            slots.forEachIndexed { slotPosition, slotIndex ->
+                desiredSequence.getOrNull(slotPosition)?.let { current[slotIndex] = it }
+            }
+
+            current.forEachIndexed { index, role ->
+                runCatching { action.selectPosition(role).moveTo(index) }
+            }
+            action.complete()
+        }.onFailure {
+            logger.warning("Failed to reorder Discord roles: ${it.message}")
+        }
+    }
 
     fun setRoles(discordUserId: String, desiredRoleIds: Set<String>, managedRoleIds: Set<String>): CompletableFuture<Void> {
         val guild = guild() ?: return CompletableFuture.completedFuture(null)
@@ -147,6 +257,14 @@ class DiscordService(
 
 data class DiscordRole(
     val id: String,
+    val name: String,
+    val color: Int,
+    val position: Int = 0,
+)
+
+/** A Discord role the editor wants to exist, in display order (first = top). */
+data class DesiredDiscordRole(
+    val id: String?,
     val name: String,
     val color: Int,
 )

@@ -77,6 +77,22 @@ class DiscordPaperclipPlugin : JavaPlugin() {
         return result
     }
 
+    /**
+     * Creates/reorders/recolours the LuckPerms groups and Discord roles requested from the editor.
+     * Discord calls block, and LuckPerms storage operations are awaited, so this MUST run off the
+     * server main thread (it is invoked on the editor websocket handler thread).
+     */
+    fun applyRoleManagement(result: EditorResult) {
+        if (::discordService.isInitialized) {
+            runCatching { discordService.applyDiscordRoleChanges(result.managedDiscordRoles) }
+                .onFailure { logger.warning("Discord role management failed: ${it.message}") }
+        }
+        if (::luckPermsService.isInitialized) {
+            runCatching { luckPermsService.applyGroupChanges(result.managedGroups) }
+                .onFailure { logger.warning("LuckPerms group management failed: ${it.message}") }
+        }
+    }
+
     fun completeAccountLink(minecraftUuid: UUID, discordUserId: String) {
         if (server.isPrimaryThread) {
             saveAccountLink(minecraftUuid, discordUserId)
@@ -111,7 +127,7 @@ class DiscordPaperclipPlugin : JavaPlugin() {
             pluginConfig,
             dataFolder.toPath(),
             logger,
-            luckPermsService::availableGroupNames,
+            luckPermsService::listGroups,
             discordService::availableRoles,
         )
         linkService = LinkService(pluginConfig, dataFolder.toPath(), logger, ::completeAccountLink)
